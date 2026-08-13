@@ -2,6 +2,12 @@
 
 All about development listed here.
 
+## Deploy Latest
+
+```shell
+npm run deploy
+```
+
 ## Create & Apply Migration
 
 ```shell

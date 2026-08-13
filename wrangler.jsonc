@@ -41,6 +41,12 @@
 			"database_name": "transium",
 			"database_id": "6a783a5b-c84c-4873-96f0-99555885d5bb"
 		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "TILES_BUCKET",
+			"bucket_name": "transium"
+		}
 	]
 	/**
 	 * Smart Placement
