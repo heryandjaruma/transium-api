@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Inter, Figtree } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
-import { Sidebar, SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -39,10 +39,10 @@ export default function RootLayout({
 				<TooltipProvider>
 					<SidebarProvider>
 						<AppSidebar />
-						<main>
+						<SidebarInset>
 							<SidebarTrigger />
 							{children}
-						</main>
+						</SidebarInset>
 					</SidebarProvider>
 				</TooltipProvider>
 			</body>

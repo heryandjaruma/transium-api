@@ -1,3 +1,8 @@
+"use client"
+
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+
 import {
     Sidebar,
     SidebarContent,
@@ -11,6 +16,8 @@ import {
 } from "@/components/ui/sidebar"
 
 export function AppSidebar() {
+    const pathname = usePathname()
+
     return (
         <Sidebar>
             <SidebarHeader>
@@ -18,10 +25,13 @@ export function AppSidebar() {
             </SidebarHeader>
             <SidebarContent>
                 <SidebarGroup>
-                    <SidebarGroupLabel>Routes Finding</SidebarGroupLabel>
+                    <SidebarGroupLabel>Routes</SidebarGroupLabel>
                     <SidebarMenu>
                         <SidebarMenuItem>
-                            <SidebarMenuButton>Map</SidebarMenuButton>
+                            <SidebarMenuButton
+                                isActive={pathname === "/map"}
+                                render={<Link href="/map">Map</Link>}
+                            />
                         </SidebarMenuItem>
                         <SidebarMenuItem>
                             <SidebarMenuButton>Routes Stops Mapping</SidebarMenuButton>
