@@ -1,0 +1,22 @@
+# Load .env.development* files when running `wrangler dev`
+NEXTJS_ENV=development
+
+# Better Auth
+# Generate with: openssl rand -base64 32
+BETTER_AUTH_SECRET=
+BETTER_AUTH_URL=http://localhost:3000
+BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:3000
+
+# Sign in with Apple
+# Required for native iOS Sign in with Apple.
+APPLE_APP_BUNDLE_IDENTIFIER=
+# Only needed if we later support Sign in with Apple on the web.
+APPLE_CLIENT_ID=
+APPLE_TEAM_ID=
+APPLE_KEY_ID=
+APPLE_PRIVATE_KEY=
+
+# Apple Maps
+APPLE_MAPS_TEAM_ID=
+APPLE_MAPS_KEY_ID=
+APPLE_MAPS_PRIVATE_KEY=

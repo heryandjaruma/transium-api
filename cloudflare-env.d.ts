@@ -7,6 +7,17 @@ interface __BaseEnv_CloudflareEnv {
 	IMAGES: ImagesBinding;
 	ASSETS: Fetcher;
 	NEXTJS_ENV: string;
+	BETTER_AUTH_SECRET: string;
+	BETTER_AUTH_URL: string;
+	BETTER_AUTH_TRUSTED_ORIGINS: string;
+	APPLE_APP_BUNDLE_IDENTIFIER: string;
+	APPLE_CLIENT_ID: string;
+	APPLE_TEAM_ID: string;
+	APPLE_KEY_ID: string;
+	APPLE_PRIVATE_KEY: string;
+	APPLE_MAPS_TEAM_ID: string;
+	APPLE_MAPS_KEY_ID: string;
+	APPLE_MAPS_PRIVATE_KEY: string;
 	WORKER_SELF_REFERENCE: Service<typeof import("./.open-next/worker").default>;
 }
 declare namespace Cloudflare {
@@ -20,7 +31,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "NEXTJS_ENV">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "NEXTJS_ENV" | "BETTER_AUTH_SECRET" | "BETTER_AUTH_URL" | "BETTER_AUTH_TRUSTED_ORIGINS" | "APPLE_APP_BUNDLE_IDENTIFIER" | "APPLE_CLIENT_ID" | "APPLE_TEAM_ID" | "APPLE_KEY_ID" | "APPLE_PRIVATE_KEY" | "APPLE_MAPS_TEAM_ID" | "APPLE_MAPS_KEY_ID" | "APPLE_MAPS_PRIVATE_KEY">> {}
 }
 
 // Begin runtime types
