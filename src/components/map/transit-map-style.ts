@@ -54,10 +54,6 @@ export const transitMapStyle: StyleSpecification = {
                 "line-color": [
                     "match",
                     ["get", "highway"],
-                    ["motorway", "trunk"],
-                    "#f2b04c",
-                    ["primary"],
-                    "#f8d878",
                     ["secondary", "tertiary"],
                     "#ffffff",
                     "#dcdcd6",
