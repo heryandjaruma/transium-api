@@ -22,6 +22,14 @@ export const transitMapStyle: StyleSpecification = {
             type: "vector",
             url: `pmtiles://${TRANSIT_PMTILES_URL}`,
         },
+        "active-route": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+        },
+        "active-stops": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+        },
     },
     layers: [
         {
@@ -98,6 +106,42 @@ export const transitMapStyle: StyleSpecification = {
                 "circle-color": "#e52522",
                 "circle-stroke-color": "#ffffff",
                 "circle-stroke-width": 1.5,
+            },
+        },
+        {
+            id: "active-route-transfer",
+            type: "line",
+            source: "active-route",
+            filter: ["==", ["get", "kind"], "transfer"],
+            layout: { "line-join": "round", "line-cap": "round" },
+            paint: {
+                "line-color": "#1a1a1a",
+                "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2, 14, 4],
+                "line-dasharray": [1, 1.5],
+                "line-opacity": 0.9,
+            },
+        },
+        {
+            id: "active-route-ride",
+            type: "line",
+            source: "active-route",
+            filter: ["==", ["get", "kind"], "ride"],
+            layout: { "line-join": "round", "line-cap": "round" },
+            paint: {
+                "line-color": "#1a1a1a",
+                "line-width": ["interpolate", ["linear"], ["zoom"], 8, 3, 14, 7],
+                "line-opacity": 0.9,
+            },
+        },
+        {
+            id: "active-stops",
+            type: "circle",
+            source: "active-stops",
+            paint: {
+                "circle-radius": 8,
+                "circle-color": ["match", ["get", "role"], "from", "#1a9e4c", "#e5252f"],
+                "circle-stroke-color": "#ffffff",
+                "circle-stroke-width": 2,
             },
         },
     ],
