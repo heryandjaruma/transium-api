@@ -57,7 +57,7 @@ export const openApiSpec = {
                                                         oneOf: [
                                                             {
                                                                 type: "object",
-                                                                required: ["to", "weight", "kind"],
+                                                                required: ["to", "weight", "distanceMeters", "kind"],
                                                                 properties: {
                                                                     to: {
                                                                         type: "string",
@@ -67,7 +67,13 @@ export const openApiSpec = {
                                                                     weight: {
                                                                         type: "number",
                                                                         description:
-                                                                            "Edge cost in meters (haversine distance, plus a fixed penalty when kind is transfer).",
+                                                                            "Search cost in seconds used for pathfinding, an estimated travel time: for ride edges, " +
+                                                                            "distanceMeters covered at bus speed; for transfer edges, distanceMeters covered at " +
+                                                                            "walking speed plus a flat wait for the next vehicle.",
+                                                                    },
+                                                                    distanceMeters: {
+                                                                        type: "number",
+                                                                        description: "True haversine distance in meters between the two stops.",
                                                                     },
                                                                     kind: {
                                                                         type: "string",
@@ -95,7 +101,8 @@ export const openApiSpec = {
                                             name: "BNDCC",
                                             via: {
                                                 to: "93b36a0c-2327-57ca-9d81-8c7936519a60",
-                                                weight: 422.56358299014215,
+                                                weight: 70.42726383169036,
+                                                distanceMeters: 422.56358299014215,
                                                 kind: "ride",
                                                 routeId: "0377a5c0-3000-5ff0-b55f-56467e93b3e2",
                                             },

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDirections } from "@/lib/apple-maps";
-import { buildGraph, haversine, Edge } from "@/lib/bus-graph";
+import { buildGraph, haversine, Edge, WALK_SPEED_MPS } from "@/lib/bus-graph";
 import { astar } from "@/lib/astar";
 import { loadRouteShapes, withLegGeometry } from "@/lib/route-geometry";
 
@@ -16,6 +16,9 @@ const CANDIDATE_STOP_COUNT = 5;
 const MAX_WALK_RADIUS_METERS = 1500;
 // Below this, walking the whole trip is considered even if a bus route exists.
 const DIRECT_WALK_THRESHOLD_METERS = 1500;
+// Wait for the first bus. Applied once per journey; later interchanges are already
+// charged their own wait by the transfer edges in the graph.
+const BOARDING_PENALTY_SECONDS = 300;
 
 function parseLatLng(value: string | null): LatLng | null {
     if (!value) return null;
@@ -102,7 +105,7 @@ function buildTransitLegs(
             const route = routes.get(routeId);
             const distanceMeters = path
                 .slice(startIdx, j)
-                .reduce((sum, step) => sum + (step.via?.weight ?? 0), 0);
+                .reduce((sum, step) => sum + (step.via?.distanceMeters ?? 0), 0);
 
             legs.push({
                 type: "bus",
@@ -130,7 +133,7 @@ function buildTransitLegs(
                 type: "transfer",
                 from: { stopId: fromStopId, name: from.name, lat: from.lat, lng: from.lng },
                 to: { stopId: toStopId, name: to.name, lat: to.lat, lng: to.lng },
-                distanceMeters: via.weight,
+                distanceMeters: via.distanceMeters,
                 geometry: via.geometry,
             });
             i++;
@@ -202,26 +205,34 @@ export async function GET(request: NextRequest) {
     const destCandidates = nearestStops(destination, stops, CANDIDATE_STOP_COUNT, MAX_WALK_RADIUS_METERS);
 
     // Search every (boarding, alighting) candidate pair and keep whichever minimizes
-    // total estimated distance (walk-to-stop + transit + walk-from-stop). A*'s edge
-    // weights are haversine-based, so this is an estimate — real walking geometry is
-    // only fetched from Apple Maps for the winning pair, once each leg, below.
-    let best: { path: PathStep[]; totalMeters: number } | null = null;
+    // total estimated travel TIME (walk-to-stop + transit + walk-from-stop). Ranking by
+    // distance instead would systematically alight too early: an extra ride hop can only
+    // shorten the remaining straight-line walk by at most its own length, so riding
+    // further never pays off when a metre of bus costs the same as a metre on foot.
+    // Graph weights are already seconds; the two walking legs are straight-line estimates
+    // here — real walking geometry is only fetched from Apple Maps for the winning pair,
+    // once each leg, below.
+    let best: { path: PathStep[]; seconds: number } | null = null;
 
     for (const oc of originCandidates) {
         for (const dc of destCandidates) {
             if (oc.id === dc.id) continue;
             const path = astar(graph, stops, oc.id, dc.id);
             if (!path) continue;
-            const transitMeters = path.reduce((sum, step) => sum + (step.via?.weight ?? 0), 0);
-            const totalMeters = oc.distanceMeters + transitMeters + dc.distanceMeters;
-            if (!best || totalMeters < best.totalMeters) {
-                best = { path: path as PathStep[], totalMeters };
+            const transitSeconds = path.reduce((sum, step) => sum + (step.via?.weight ?? 0), 0);
+            const seconds =
+                (oc.distanceMeters + dc.distanceMeters) / WALK_SPEED_MPS +
+                transitSeconds +
+                BOARDING_PENALTY_SECONDS;
+            if (!best || seconds < best.seconds) {
+                best = { path: path as PathStep[], seconds };
             }
         }
     }
 
     const directWalkMeters = haversine(origin, destination);
-    const preferDirectWalk = !best || (directWalkMeters <= DIRECT_WALK_THRESHOLD_METERS && directWalkMeters < best.totalMeters);
+    const directWalkSeconds = directWalkMeters / WALK_SPEED_MPS;
+    const preferDirectWalk = !best || (directWalkMeters <= DIRECT_WALK_THRESHOLD_METERS && directWalkSeconds < best.seconds);
 
     if (preferDirectWalk) {
         const walk = await walkSegment(

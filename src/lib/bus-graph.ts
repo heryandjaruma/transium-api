@@ -1,13 +1,23 @@
 export type Edge = {
     to: string;
     weight: number;
+    distanceMeters: number;
     kind: "ride" | "transfer";
     routeId?: string
 }
 export type Graph = Map<string, Edge[]>
 
+// Edge weights are travel-time estimates in SECONDS; `distanceMeters` stays in metres.
+// Time is what the search must minimise, not distance: charging a metre of riding the
+// same as a metre of walking makes staying on the bus never pay off, because a ride hop
+// can only ever close the straight-line gap to the goal by at most its own length.
+export const WALK_SPEED_MPS = 1.35
+export const BUS_SPEED_MPS = 6.0 // ~22 km/h, including dwell at stops
+
 const TRANSFER_RADIUS_M = 250
-const TRANSFER_PENALTY_M = 300
+// Interchange cost on top of the walk itself: waiting for the next vehicle. Flat,
+// because that wait does not depend on how far you walked to reach the other stop.
+const TRANSFER_WAIT_SECONDS = 180
 
 export function haversine(
     a: {lat: number, lng: number},
@@ -38,20 +48,24 @@ export async function buildGraph(db: D1Database): Promise<{ graph: Graph, stops:
     for (const [routeId, rows] of byRoute) {
         for (let i = 0; i < rows.length - 1; i++) {
             const a = stops.get(rows[i].stopId)!, b = stops.get(rows[i+1].stopId)!
-            graph.get(rows[i].stopId)!.push({ to: rows[i+1].stopId, weight: haversine(a, b), kind: "ride", routeId})
+            const d = haversine(a, b)
+            graph.get(rows[i].stopId)!.push({ to: rows[i+1].stopId, weight: d / BUS_SPEED_MPS, distanceMeters: d, kind: "ride", routeId})
         }
     }
     
-    // transfer edges: proximity clustering across all stops (On^2), fine at n≈490
+    // transfer edges: proximity clustering across all stops (On^2), fine at n≈490.
+    // Cost is the walk itself plus a flat wait for the next vehicle, so even a
+    // same-platform interchange (d≈0, e.g. route termini shared between directions)
+    // pays for the change of bus rather than coming out free.
     const ids = [...stops.keys()]
     for (let i = 0; i < ids.length; i++) {
         for (let j = i+1; j < ids.length; j++) {
             const a = stops.get(ids[i])!, b = stops.get(ids[j])!
             const d = haversine(a, b)
-            if (d <= TRANSFER_RADIUS_M && d > 0) {
-                const w = d + TRANSFER_PENALTY_M
-                graph.get(ids[i])!.push({ to: ids[j], weight: w, kind: "transfer"})
-                graph.get(ids[j])!.push({ to: ids[i], weight: w, kind: "transfer"})
+            if (d <= TRANSFER_RADIUS_M) {
+                const w = d / WALK_SPEED_MPS + TRANSFER_WAIT_SECONDS
+                graph.get(ids[i])!.push({ to: ids[j], weight: w, distanceMeters: d, kind: "transfer"})
+                graph.get(ids[j])!.push({ to: ids[i], weight: w, distanceMeters: d, kind: "transfer"})
             }
         }
     }

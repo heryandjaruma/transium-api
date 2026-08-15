@@ -15,16 +15,20 @@ import { loadRouteShapes, withLegGeometry } from "@/lib/route-geometry";
  *   "name": "BNDCC",
  *   "via": {
  *     "to": "93b36a0c-2327-57ca-9d81-8c7936519a60",
- *     "weight": 422.56358299014215,
+ *     "weight": 70.42726383169036,
+ *     "distanceMeters": 422.56358299014215,
  *     "kind": "ride",
  *     "routeId": "0377a5c0-3000-5ff0-b55f-56467e93b3e2",
  *     "geometry": [[115.2537, -8.7089], [115.2540, -8.7091], "..."]
  *   }
  * }
  * ```
- * `kind` can be `ride` or `transfer`. `geometry` is the road-following path for this
- * leg as [lng, lat] pairs — sliced from the route's shape for `ride` legs, a straight
- * two-point line for `transfer` legs.
+ * `kind` can be `ride` or `transfer`. `distanceMeters` is the true haversine distance
+ * for this leg; `weight` is the cost used for pathfinding, an estimated travel time in
+ * seconds — `distanceMeters` at bus speed for `ride` legs, at walking speed plus a flat
+ * wait for the next vehicle for `transfer` legs. `geometry` is the road-following path
+ * for this leg as [lng, lat] pairs — sliced from the route's shape for `ride` legs, a
+ * straight two-point line for `transfer` legs.
  */
 export async function GET(request: NextRequest) {
     const params = request.nextUrl.searchParams

@@ -26,6 +26,10 @@ export const transitMapStyle: StyleSpecification = {
             type: "geojson",
             data: { type: "FeatureCollection", features: [] },
         },
+        "active-route-arrow-points": {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+        },
         "active-stops": {
             type: "geojson",
             data: { type: "FeatureCollection", features: [] },
@@ -140,6 +144,20 @@ export const transitMapStyle: StyleSpecification = {
                 "line-color": ["coalesce", ["get", "color"], "#1a1a1a"],
                 "line-width": ["interpolate", ["linear"], ["zoom"], 8, 3, 14, 7],
                 "line-opacity": 0.9,
+            },
+        },
+        {
+            id: "active-route-arrows",
+            type: "symbol",
+            source: "active-route-arrow-points",
+            minzoom: 12,
+            layout: {
+                "icon-image": "route-arrow",
+                "icon-size": ["interpolate", ["linear"], ["zoom"], 12, 0.3, 17, 0.55],
+                "icon-rotate": ["get", "bearing"],
+                "icon-rotation-alignment": "map",
+                "icon-allow-overlap": true,
+                "icon-ignore-placement": true,
             },
         },
         {

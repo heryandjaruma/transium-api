@@ -37,6 +37,113 @@ function ensurePmtilesProtocol() {
 
 const ROUTE_LINE_LAYER_IDS = ["bus-routes"]
 
+/**
+ * Bold chevron pointing "up"; symbol-placement:"line" rotates it to match each line's
+ * bearing. Drawn as a white-haloed stroke (not a small filled triangle) so it stays
+ * legible at small render sizes and reads on top of any route line color.
+ */
+function addRouteArrowIcon(map: MaplibreMap) {
+    if (map.hasImage("route-arrow")) return
+    const size = 48
+    const canvas = document.createElement("canvas")
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext("2d")!
+    const drawChevron = () => {
+        ctx.beginPath()
+        ctx.moveTo(size * 0.22, size * 0.66)
+        ctx.lineTo(size * 0.5, size * 0.2)
+        ctx.lineTo(size * 0.78, size * 0.66)
+    }
+    ctx.lineJoin = "round"
+    ctx.lineCap = "round"
+    drawChevron()
+    ctx.lineWidth = size * 0.24
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)"
+    ctx.stroke()
+    drawChevron()
+    ctx.lineWidth = size * 0.12
+    ctx.strokeStyle = "#1e293b"
+    ctx.stroke()
+    map.addImage("route-arrow", ctx.getImageData(0, 0, size, size))
+}
+
+const EARTH_RADIUS_METERS = 6371000
+
+function haversineMeters(a: [number, number], b: [number, number]) {
+    const toRad = (d: number) => (d * Math.PI) / 180
+    const dLat = toRad(b[1] - a[1])
+    const dLng = toRad(b[0] - a[0])
+    const lat1 = toRad(a[1])
+    const lat2 = toRad(b[1])
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
+    return 2 * EARTH_RADIUS_METERS * Math.asin(Math.sqrt(h))
+}
+
+/** Initial bearing from a to b, in degrees clockwise from north (matches icon-rotate). */
+function bearingDegrees(a: [number, number], b: [number, number]) {
+    const toRad = (d: number) => (d * Math.PI) / 180
+    const toDeg = (r: number) => (r * 180) / Math.PI
+    const lat1 = toRad(a[1])
+    const lat2 = toRad(b[1])
+    const dLng = toRad(b[0] - a[0])
+    const y = Math.sin(dLng) * Math.cos(lat2)
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng)
+    return (toDeg(Math.atan2(y, x)) + 360) % 360
+}
+
+function pointAtDistance(coords: [number, number][], cumDist: number[], target: number): [number, number] {
+    if (target <= 0) return coords[0]
+    const total = cumDist[cumDist.length - 1]
+    if (target >= total) return coords[coords.length - 1]
+    for (let i = 1; i < coords.length; i++) {
+        if (cumDist[i] >= target) {
+            const segStart = cumDist[i - 1]
+            const segEnd = cumDist[i]
+            const t = segEnd === segStart ? 0 : (target - segStart) / (segEnd - segStart)
+            const a = coords[i - 1]
+            const b = coords[i]
+            return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+        }
+    }
+    return coords[coords.length - 1]
+}
+
+/**
+ * Walks a line at a fixed meter interval, placing an arrow anchor at each stop.
+ * Each anchor's bearing points at the *next* anchor's position (one full spacing
+ * step ahead), not at the nearest raw vertex — real-world route shapes (bus GPS
+ * traces, walking directions, opposite-carriageway loops picked up while slicing a
+ * route's shape) can wander back and forth locally over tens of meters, which made
+ * bearings computed from nearby vertices flip direction from one arrow to the next.
+ * Aiming each arrow at the following one guarantees consecutive arrows never
+ * contradict each other, while the line itself still renders the real path.
+ */
+function sampleArrowAnchors(coords: [number, number][], spacingMeters: number) {
+    const anchors: { point: [number, number]; bearing: number }[] = []
+    if (coords.length < 2) return anchors
+
+    const cumDist = [0]
+    for (let i = 1; i < coords.length; i++) cumDist.push(cumDist[i - 1] + haversineMeters(coords[i - 1], coords[i]))
+    const total = cumDist[cumDist.length - 1]
+    if (total === 0) return anchors
+
+    for (let d = spacingMeters / 2; d < total; d += spacingMeters) {
+        const from = pointAtDistance(coords, cumDist, d)
+        const to = pointAtDistance(coords, cumDist, Math.min(total, d + spacingMeters))
+        if (from[0] === to[0] && from[1] === to[1]) continue
+        anchors.push({ point: from, bearing: bearingDegrees(from, to) })
+    }
+    return anchors
+}
+
+/** ~5 arrows per segment regardless of length, but never denser than every 60m or sparser than every 220m. */
+function spacingForSegment(coords: [number, number][]) {
+    let total = 0
+    for (let i = 1; i < coords.length; i++) total += haversineMeters(coords[i - 1], coords[i])
+    return Math.min(220, Math.max(60, total / 5))
+}
+
 type ActivePoint = { lng: number; lat: number; role: "origin" | "destination" | "stop" }
 
 /** Every stop this segment touches, so intermediate board/alight/transfer points get pinned too. */
@@ -78,6 +185,7 @@ export function TransitMap() {
         })
         map.on("load", () => {
             map.getCanvas().style.cursor = "crosshair"
+            addRouteArrowIcon(map)
         })
 
         let origin: LatLng | null = null
@@ -111,8 +219,24 @@ export function TransitMap() {
             })
         }
 
+        const setActiveRouteArrows = (segments: JourneySegment[]) => {
+            const source = map.getSource("active-route-arrow-points") as GeoJSONSource | undefined
+            source?.setData({
+                type: "FeatureCollection",
+                features: segments.flatMap((seg) => {
+                    const coords = seg.geometry
+                    return sampleArrowAnchors(coords, spacingForSegment(coords)).map((anchor) => ({
+                        type: "Feature" as const,
+                        geometry: { type: "Point" as const, coordinates: anchor.point },
+                        properties: { bearing: anchor.bearing },
+                    }))
+                }),
+            })
+        }
+
         const renderJourney = (j: JourneyOverview) => {
             setActiveRoute(j.segments)
+            setActiveRouteArrows(j.segments)
 
             const points = new Map<string, ActivePoint>()
             for (const segment of j.segments) {
@@ -134,6 +258,7 @@ export function TransitMap() {
             destination = null
             setActivePoints([])
             setActiveRoute([])
+            setActiveRouteArrows([])
             setJourney(null)
             setStatus("Click the map to set your departure point")
         }
@@ -152,6 +277,7 @@ export function TransitMap() {
                 if (!res.ok || !data.segments) {
                     setJourney(null)
                     setActiveRoute([])
+                    setActiveRouteArrows([])
                     setStatus(data.error ?? "No journey found")
                     return
                 }
@@ -202,6 +328,7 @@ export function TransitMap() {
                 destination = null
                 setJourney(null)
                 setActiveRoute([])
+                setActiveRouteArrows([])
                 setActivePoints([{ lng: point.lng, lat: point.lat, role: "origin" }])
                 setStatus("Departure set — click the map for your destination")
                 return

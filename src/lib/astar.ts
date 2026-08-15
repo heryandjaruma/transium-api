@@ -1,11 +1,14 @@
 import { MinPriorityQueue } from "@datastructures-js/priority-queue";
-import { Edge, Graph, haversine } from "./bus-graph";
+import { BUS_SPEED_MPS, Edge, Graph, haversine } from "./bus-graph";
 
 type QueueItem = { id: string; priority: number }
 
 export function astar(graph: Graph, stops: Map<string, { lat: number; lng: number; name: string }>, start: string, goal: string) {
     const goalPos = stops.get(goal)!
-    const h = (id: string) => haversine(stops.get(id)!, goalPos)
+    // Edge weights are seconds, so the heuristic must divide by the FASTEST mode to stay
+    // admissible — nothing closes ground quicker than a bus heading straight at the goal.
+    // Leaving this in metres would over-estimate ~6x and start returning wrong paths.
+    const h = (id: string) => haversine(stops.get(id)!, goalPos) / BUS_SPEED_MPS
 
     const gScore = new Map([[start, 0]])
     const cameFrom = new Map<string, { from: string; edge: Edge }>()
