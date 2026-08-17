@@ -48,7 +48,10 @@ export function AppSidebar() {
                     <SidebarGroupLabel>Quest</SidebarGroupLabel>
                     <SidebarMenu>
                         <SidebarMenuItem>
-                            <SidebarMenuButton>Quests</SidebarMenuButton>
+                            <SidebarMenuButton
+                                isActive={pathname === "/quests"}
+                                render={<Link href="/quests">Quests</Link>}
+                            />
                         </SidebarMenuItem>
                         <SidebarMenuItem>
                             <SidebarMenuButton>Badges</SidebarMenuButton>
