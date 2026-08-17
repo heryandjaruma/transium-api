@@ -3,7 +3,37 @@ import { BUS_SPEED_MPS, Edge, Graph, haversine } from "./bus-graph";
 
 type QueueItem = { id: string; priority: number }
 
-export function astar(graph: Graph, stops: Map<string, { lat: number; lng: number; name: string }>, start: string, goal: string) {
+// Routing objective:
+//   cost = in_vehicle_time
+//        + walkTimeWeight  * walking_time
+//        + waitTimeWeight  * waiting_time
+//        + transferPenalty * num_transfers
+// in_vehicle_time is implicitly weighted 1 — every other term is priced relative to
+// riding. Keep walkTimeWeight/waitTimeWeight >= 1 and transferPenalty >= 0: the
+// heuristic below assumes riding straight at the goal is always the cheapest way to
+// close ground, which only holds if nothing can be weighted below 1.
+export type CostWeights = {
+    walkTimeWeight: number;
+    waitTimeWeight: number;
+    transferPenalty: number;
+}
+
+export const DEFAULT_WEIGHTS: CostWeights = { walkTimeWeight: 1, waitTimeWeight: 1, transferPenalty: 0 }
+
+function edgeCost(edge: Edge, weights: CostWeights) {
+    return edge.inVehicleTime
+        + weights.walkTimeWeight * edge.walkingTime
+        + weights.waitTimeWeight * edge.waitingTime
+        + (edge.kind === "transfer" ? weights.transferPenalty : 0)
+}
+
+export function astar(
+    graph: Graph,
+    stops: Map<string, { lat: number; lng: number; name: string }>,
+    start: string,
+    goal: string,
+    weights: CostWeights = DEFAULT_WEIGHTS
+) {
     const goalPos = stops.get(goal)!
     // Edge weights are seconds, so the heuristic must divide by the FASTEST mode to stay
     // admissible — nothing closes ground quicker than a bus heading straight at the goal.
@@ -23,7 +53,7 @@ export function astar(graph: Graph, stops: Map<string, { lat: number; lng: numbe
         closed.add(current)
 
         for (const edge of graph.get(current) ?? []) {
-            const tentative = gScore.get(current)! + edge.weight
+            const tentative = gScore.get(current)! + edgeCost(edge, weights)
             if (tentative < (gScore.get(edge.to) ?? Infinity)) {
                 gScore.set(edge.to, tentative)
                 cameFrom.set(edge.to, { from: current, edge })
