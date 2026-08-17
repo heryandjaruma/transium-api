@@ -1,41 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { buildGraph } from "@/lib/bus-graph";
-import { astar, CostWeights } from "@/lib/astar";
+import { astar } from "@/lib/astar";
 import { loadRouteShapes, withLegGeometry } from "@/lib/route-geometry";
-
-// Two routing profiles built from the shared cost model (see astar.ts):
-//   cost = in_vehicle_time + walkTimeWeight*walking_time + waitTimeWeight*waiting_time + transferPenalty*num_transfers
-// `lessWalking` prices walking heavily so the search leans on transit instead of foot
-// legs. `lessTransit` prices each transfer heavily (roughly a worst-case headway wait)
-// so the search favours fewer, longer legs — walking a bit further rather than hopping
-// buses — while still treating actual walking time as cheap.
-const LESS_WALKING_WEIGHTS: CostWeights = { walkTimeWeight: 3, waitTimeWeight: 1.5, transferPenalty: 120 }
-const LESS_TRANSIT_WEIGHTS: CostWeights = { walkTimeWeight: 1, waitTimeWeight: 1.2, transferPenalty: 900 }
+import { ROUTE_PROFILES, summarizePath } from "@/lib/path-cost";
 
 type PathStep = { stopId: string; via: { kind: "ride" | "transfer"; inVehicleTime: number; walkingTime: number; waitingTime: number } | null }
-
-function summarizePath(path: PathStep[], weights: CostWeights, initialWaitSeconds: number) {
-    let inVehicleTime = 0, walkingTime = 0, waitingTime = initialWaitSeconds, numTransfers = 0
-    for (const step of path) {
-        if (!step.via) continue
-        inVehicleTime += step.via.inVehicleTime
-        walkingTime += step.via.walkingTime
-        waitingTime += step.via.waitingTime
-        if (step.via.kind === "transfer") numTransfers++
-    }
-    return {
-        inVehicleTime,
-        walkingTime,
-        waitingTime,
-        numTransfers,
-        totalSeconds: inVehicleTime + walkingTime + waitingTime,
-        weightedCost: inVehicleTime
-            + weights.walkTimeWeight * walkingTime
-            + weights.waitTimeWeight * waitingTime
-            + weights.transferPenalty * numTransfers,
-    }
-}
 
 /**
  * Return the path between `from` and `to`, once optimised for less walking and once
@@ -99,13 +69,8 @@ export async function GET(request: NextRequest) {
 
     const routeShapes = await loadRouteShapes(env.DB)
 
-    const profiles: Record<"lessWalking" | "lessTransit", CostWeights> = {
-        lessWalking: LESS_WALKING_WEIGHTS,
-        lessTransit: LESS_TRANSIT_WEIGHTS,
-    }
-
     const results: Record<string, unknown> = {}
-    for (const [key, weights] of Object.entries(profiles)) {
+    for (const [key, weights] of Object.entries(ROUTE_PROFILES)) {
         const path = astar(graph, stops, from, to, weights)
         if (!path) {
             results[key] = null

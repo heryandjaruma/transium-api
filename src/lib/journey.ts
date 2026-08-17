@@ -57,3 +57,12 @@ export type JourneyOverview = {
     summary: JourneySummary
     segments: JourneySegment[]
 }
+
+export type RouteProfileKey = "lessWalking" | "lessTransit"
+
+export const ROUTE_PROFILE_LABELS: Record<RouteProfileKey, string> = {
+    lessWalking: "Less walking",
+    lessTransit: "Fewer transfers",
+}
+
+export type JourneyAlternatives = Record<RouteProfileKey, JourneyOverview | null>

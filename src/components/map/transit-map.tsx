@@ -20,7 +20,7 @@ import {
     transitMapStyle,
 } from "@/components/map/transit-map-style"
 import { JourneyPanel } from "@/components/map/journey-panel"
-import type { JourneyOverview, JourneySegment, LatLng } from "@/lib/journey"
+import type { JourneyAlternatives, JourneyOverview, JourneySegment, LatLng, RouteProfileKey } from "@/lib/journey"
 
 let pmtilesProtocolRegistered = false
 
@@ -168,7 +168,10 @@ export function TransitMap() {
     const containerRef = useRef<HTMLDivElement | null>(null)
     const [status, setStatus] = useState("Click the map to set your departure point")
     const [journey, setJourney] = useState<JourneyOverview | null>(null)
+    const [alternatives, setAlternatives] = useState<JourneyAlternatives | null>(null)
+    const [selectedProfile, setSelectedProfile] = useState<RouteProfileKey>("lessWalking")
     const resetRef = useRef<() => void>(() => {})
+    const selectProfileRef = useRef<(key: RouteProfileKey) => void>(() => {})
 
     useEffect(() => {
         if (!containerRef.current) return
@@ -199,6 +202,7 @@ export function TransitMap() {
         let origin: LatLng | null = null
         let destination: LatLng | null = null
         let requestId = 0
+        let currentAlternatives: JourneyAlternatives | null = null
 
         const setActivePoints = (points: ActivePoint[]) => {
             const source = map.getSource("active-stops") as GeoJSONSource | undefined
@@ -291,14 +295,35 @@ export function TransitMap() {
             requestId++
             origin = null
             destination = null
+            currentAlternatives = null
             setActivePoints([])
             setActiveRoute([])
             setActiveRouteArrows([])
             clearStopLabels()
             setJourney(null)
+            setAlternatives(null)
+            setSelectedProfile("lessWalking")
             setStatus("Click the map to set your departure point")
         }
         resetRef.current = reset
+
+        // Switches which of the two fetched alternatives (less walking / fewer
+        // transfers) is drawn on the map, without refetching. Falls back to whichever
+        // alternative exists if the requested one came back null (no route under that
+        // profile — e.g. a single-route journey where both profiles agree anyway).
+        const applySelection = (key: RouteProfileKey) => {
+            if (!currentAlternatives) return
+            const resolvedKey = currentAlternatives[key] ? key : (Object.keys(currentAlternatives) as RouteProfileKey[]).find(
+                (k) => currentAlternatives![k]
+            )
+            const chosen = resolvedKey ? currentAlternatives[resolvedKey] : null
+            if (!chosen || !resolvedKey) return
+
+            setSelectedProfile(resolvedKey)
+            setJourney(chosen)
+            renderJourney(chosen)
+        }
+        selectProfileRef.current = applySelection
 
         const planJourney = async (from: LatLng, to: LatLng) => {
             const thisRequest = ++requestId
@@ -307,19 +332,21 @@ export function TransitMap() {
                 const res = await fetch(
                     `/api/journey/overview?origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}`
                 )
-                const data = (await res.json()) as JourneyOverview & { error?: string }
+                const data = (await res.json()) as JourneyAlternatives & { error?: string }
                 if (thisRequest !== requestId) return // superseded by a newer click/reset
 
-                if (!res.ok || !data.segments) {
+                if (!res.ok || (!data.lessWalking && !data.lessTransit)) {
                     setJourney(null)
+                    setAlternatives(null)
                     setActiveRoute([])
                     setActiveRouteArrows([])
                     setStatus(data.error ?? "No journey found")
                     return
                 }
 
-                setJourney(data)
-                renderJourney(data)
+                currentAlternatives = data
+                setAlternatives(data)
+                applySelection("lessWalking")
                 setStatus("Click the map to plan a new journey")
             } catch (err) {
                 console.error("Failed to fetch journey overview:", err)
@@ -402,7 +429,14 @@ export function TransitMap() {
             <div className="relative min-w-0 flex-1">
                 <div ref={containerRef} className="h-full w-full" />
             </div>
-            <JourneyPanel journey={journey} status={status} onReset={() => resetRef.current()} />
+            <JourneyPanel
+                journey={journey}
+                alternatives={alternatives}
+                selectedProfile={selectedProfile}
+                onSelectProfile={(key) => selectProfileRef.current(key)}
+                status={status}
+                onReset={() => resetRef.current()}
+            />
         </div>
     )
 }

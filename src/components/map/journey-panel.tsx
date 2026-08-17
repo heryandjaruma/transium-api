@@ -3,7 +3,8 @@
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { formatDistance, formatDuration } from "@/lib/format"
-import type { JourneyOverview, JourneySegment } from "@/lib/journey"
+import { ROUTE_PROFILE_LABELS } from "@/lib/journey"
+import type { JourneyAlternatives, JourneyOverview, JourneySegment, RouteProfileKey } from "@/lib/journey"
 
 function SegmentRow({ segment }: { segment: JourneySegment }) {
     if (segment.type === "walk") {
@@ -60,12 +61,49 @@ function SegmentRow({ segment }: { segment: JourneySegment }) {
     )
 }
 
+function ProfileSwitch({
+    alternatives,
+    selectedProfile,
+    onSelectProfile,
+}: {
+    alternatives: JourneyAlternatives
+    selectedProfile: RouteProfileKey
+    onSelectProfile: (key: RouteProfileKey) => void
+}) {
+    const keys = Object.keys(ROUTE_PROFILE_LABELS) as RouteProfileKey[]
+    const available = keys.filter((key) => alternatives[key])
+    // Nothing to switch between (e.g. both profiles landed on the same/only route).
+    if (available.length < 2) return null
+
+    return (
+        <div className="mt-4 flex gap-2">
+            {available.map((key) => (
+                <Button
+                    key={key}
+                    size="sm"
+                    variant={key === selectedProfile ? "default" : "outline"}
+                    className="flex-1"
+                    onClick={() => onSelectProfile(key)}
+                >
+                    {ROUTE_PROFILE_LABELS[key]}
+                </Button>
+            ))}
+        </div>
+    )
+}
+
 export function JourneyPanel({
     journey,
+    alternatives,
+    selectedProfile,
+    onSelectProfile,
     status,
     onReset,
 }: {
     journey: JourneyOverview | null
+    alternatives: JourneyAlternatives | null
+    selectedProfile: RouteProfileKey
+    onSelectProfile: (key: RouteProfileKey) => void
     status: string
     onReset: () => void
 }) {
@@ -80,6 +118,14 @@ export function JourneyPanel({
             <Separator />
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
                 <p className="text-sm text-muted-foreground">{status}</p>
+
+                {alternatives && (
+                    <ProfileSwitch
+                        alternatives={alternatives}
+                        selectedProfile={selectedProfile}
+                        onSelectProfile={onSelectProfile}
+                    />
+                )}
 
                 {journey && (
                     <>

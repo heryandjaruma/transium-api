@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDirections } from "@/lib/apple-maps";
 import { buildGraph, haversine, Edge, WALK_SPEED_MPS } from "@/lib/bus-graph";
-import { astar } from "@/lib/astar";
+import { astar, CostWeights } from "@/lib/astar";
 import { loadRouteShapes, withLegGeometry } from "@/lib/route-geometry";
+import { ROUTE_PROFILES, RouteProfileKey, summarizePath } from "@/lib/path-cost";
 
 type LatLng = { lat: number; lng: number };
 type LngLat = [number, number];
@@ -16,9 +17,6 @@ const CANDIDATE_STOP_COUNT = 5;
 const MAX_WALK_RADIUS_METERS = 1500;
 // Below this, walking the whole trip is considered even if a bus route exists.
 const DIRECT_WALK_THRESHOLD_METERS = 1500;
-// Wait for the first bus. Applied once per journey; later interchanges are already
-// charged their own wait by the transfer edges in the graph.
-const BOARDING_PENALTY_SECONDS = 300;
 
 function parseLatLng(value: string | null): LatLng | null {
     if (!value) return null;
@@ -181,8 +179,9 @@ function summarize(segments: any[]) {
  * - `origin`: "lat,lng"
  * - `destination`: "lat,lng"
  *
- * Returns journey segments for walking, bus rides, and transfers,
- * along with a summary of the trip.
+ * Returns `{ lessWalking, lessTransit }`, each holding journey segments for walking,
+ * bus rides, and transfers plus a summary — or `null` if no route exists under that
+ * profile. See path-cost.ts for what the two profiles optimise for.
  */
 export async function GET(request: NextRequest) {
     const params = request.nextUrl.searchParams;
@@ -195,7 +194,7 @@ export async function GET(request: NextRequest) {
     }
 
     const { env } = getCloudflareContext();
-    const { graph, stops } = await buildGraph(env.DB);
+    const { graph, stops, stopWaitSeconds } = await buildGraph(env.DB);
 
     if (stops.size === 0) {
         return NextResponse.json({ error: "No stops available" }, { status: 404 });
@@ -204,91 +203,110 @@ export async function GET(request: NextRequest) {
     const originCandidates = nearestStops(origin, stops, CANDIDATE_STOP_COUNT, MAX_WALK_RADIUS_METERS);
     const destCandidates = nearestStops(destination, stops, CANDIDATE_STOP_COUNT, MAX_WALK_RADIUS_METERS);
 
-    // Search every (boarding, alighting) candidate pair and keep whichever minimizes
-    // total estimated travel TIME (walk-to-stop + transit + walk-from-stop). Ranking by
-    // distance instead would systematically alight too early: an extra ride hop can only
-    // shorten the remaining straight-line walk by at most its own length, so riding
-    // further never pays off when a metre of bus costs the same as a metre on foot.
-    // Graph weights are already seconds; the two walking legs are straight-line estimates
-    // here — real walking geometry is only fetched from Apple Maps for the winning pair,
-    // once each leg, below.
-    let best: { path: PathStep[]; seconds: number } | null = null;
-
-    for (const oc of originCandidates) {
-        for (const dc of destCandidates) {
-            if (oc.id === dc.id) continue;
-            const path = astar(graph, stops, oc.id, dc.id);
-            if (!path) continue;
-            const transitSeconds = path.reduce((sum, step) => sum + (step.via?.weight ?? 0), 0);
-            const seconds =
-                (oc.distanceMeters + dc.distanceMeters) / WALK_SPEED_MPS +
-                transitSeconds +
-                BOARDING_PENALTY_SECONDS;
-            if (!best || seconds < best.seconds) {
-                best = { path: path as PathStep[], seconds };
-            }
-        }
-    }
-
     const directWalkMeters = haversine(origin, destination);
     const directWalkSeconds = directWalkMeters / WALK_SPEED_MPS;
-    const preferDirectWalk = !best || (directWalkMeters <= DIRECT_WALK_THRESHOLD_METERS && directWalkSeconds < best.seconds);
-
-    if (preferDirectWalk) {
-        const walk = await walkSegment(
-            env,
-            { ...origin, name: "Origin" },
-            { ...destination, name: "Destination" }
-        );
-        if (!walk) return NextResponse.json({ error: "No route found" }, { status: 404 });
-
-        return NextResponse.json({
-            origin,
-            destination,
-            summary: summarize([walk]),
-            segments: [walk],
-        });
-    }
 
     const routeShapes = await loadRouteShapes(env.DB);
-    const pathWithGeometry = withLegGeometry(best!.path, stops, routeShapes) as PathStep[];
-
-    const boardingStopId = pathWithGeometry[0].stopId;
-    const alightingStopId = pathWithGeometry[pathWithGeometry.length - 1].stopId;
-    const boardingStop = stops.get(boardingStopId)!;
-    const alightingStop = stops.get(alightingStopId)!;
-
-    const initialWalk = await walkSegment(
-        env,
-        { ...origin, name: "Origin" },
-        { lat: boardingStop.lat, lng: boardingStop.lng, name: boardingStop.name, stopId: boardingStopId }
-    );
-    if (!initialWalk) {
-        return NextResponse.json({ error: "No walking route to boarding stop" }, { status: 404 });
-    }
-
     const routesRes = await env.DB.prepare(`SELECT id, ref, name, direction, color FROM BusRoute`).all();
     const routesById = new Map(
         (routesRes.results as any[]).map((r) => [r.id as string, r as { ref: string; name: string; direction: string; color: string }])
     );
 
-    const transitLegs = buildTransitLegs(pathWithGeometry, stops, routesById);
+    // Two profiles can land on the exact same physical path (common when only one
+    // sensible route exists) — cache by the path's stop sequence so we don't hit Apple
+    // Maps twice for identical walking legs.
+    const journeyCache = new Map<string, Promise<{ segments: any[]; summary: ReturnType<typeof summarize> } | null>>();
 
-    const finalWalk = await walkSegment(
-        env,
-        { lat: alightingStop.lat, lng: alightingStop.lng, name: alightingStop.name, stopId: alightingStopId },
-        { ...destination, name: "Destination" }
-    );
-    if (!finalWalk) {
-        return NextResponse.json({ error: "No walking route from alighting stop" }, { status: 404 });
+    async function buildJourneyForProfile(weights: CostWeights) {
+        // Search every (boarding, alighting) candidate pair and keep whichever minimizes
+        // the weighted cost (walk-to-stop + transit + walk-from-stop, all priced the same
+        // way as the profile prices the rest of the trip). Ranking by distance instead
+        // would systematically alight too early: an extra ride hop can only shorten the
+        // remaining straight-line walk by at most its own length, so riding further never
+        // pays off when a metre of bus costs the same as a metre on foot. The two walking
+        // legs are straight-line estimates here — real walking geometry is only fetched
+        // from Apple Maps for the winning pair, once each leg, below.
+        let best: { path: PathStep[]; totalSeconds: number; weightedCost: number } | null = null;
+
+        for (const oc of originCandidates) {
+            for (const dc of destCandidates) {
+                if (oc.id === dc.id) continue;
+                const path = astar(graph, stops, oc.id, dc.id, weights);
+                if (!path) continue;
+
+                const boardsAVehicle = path.some((step) => step.via?.kind === "ride");
+                const initialWaitSeconds = boardsAVehicle ? (stopWaitSeconds.get(oc.id) ?? 0) : 0;
+                const s = summarizePath(path, weights, initialWaitSeconds);
+
+                const walkToStopSeconds = oc.distanceMeters / WALK_SPEED_MPS;
+                const walkFromStopSeconds = dc.distanceMeters / WALK_SPEED_MPS;
+                const totalSeconds = walkToStopSeconds + s.totalSeconds + walkFromStopSeconds;
+                const weightedCost = weights.walkTimeWeight * (walkToStopSeconds + walkFromStopSeconds) + s.weightedCost;
+
+                if (!best || weightedCost < best.weightedCost) {
+                    best = { path: path as PathStep[], totalSeconds, weightedCost };
+                }
+            }
+        }
+
+        const preferDirectWalk = !best || (directWalkMeters <= DIRECT_WALK_THRESHOLD_METERS && directWalkSeconds < best.totalSeconds);
+
+        if (preferDirectWalk) {
+            const walk = await walkSegment(env, { ...origin!, name: "Origin" }, { ...destination!, name: "Destination" });
+            if (!walk) return null;
+            return { segments: [walk], summary: summarize([walk]) };
+        }
+
+        const signature = best!.path.map((step) => step.stopId).join(">");
+        if (!journeyCache.has(signature)) {
+            journeyCache.set(
+                signature,
+                (async () => {
+                    const pathWithGeometry = withLegGeometry(best!.path, stops, routeShapes) as PathStep[];
+
+                    const boardingStopId = pathWithGeometry[0].stopId;
+                    const alightingStopId = pathWithGeometry[pathWithGeometry.length - 1].stopId;
+                    const boardingStop = stops.get(boardingStopId)!;
+                    const alightingStop = stops.get(alightingStopId)!;
+
+                    const initialWalk = await walkSegment(
+                        env,
+                        { ...origin!, name: "Origin" },
+                        { lat: boardingStop.lat, lng: boardingStop.lng, name: boardingStop.name, stopId: boardingStopId }
+                    );
+                    if (!initialWalk) return null;
+
+                    const transitLegs = buildTransitLegs(pathWithGeometry, stops, routesById);
+
+                    const finalWalk = await walkSegment(
+                        env,
+                        { lat: alightingStop.lat, lng: alightingStop.lng, name: alightingStop.name, stopId: alightingStopId },
+                        { ...destination!, name: "Destination" }
+                    );
+                    if (!finalWalk) return null;
+
+                    const segments = [initialWalk, ...transitLegs, finalWalk];
+                    return { segments, summary: summarize(segments) };
+                })()
+            );
+        }
+        return journeyCache.get(signature)!;
     }
 
-    const segments = [initialWalk, ...transitLegs, finalWalk];
+    const entries = await Promise.all(
+        (Object.entries(ROUTE_PROFILES) as [RouteProfileKey, CostWeights][]).map(
+            async ([key, weights]) => [key, await buildJourneyForProfile(weights)] as const
+        )
+    );
 
-    return NextResponse.json({
-        origin,
-        destination,
-        summary: summarize(segments),
-        segments,
-    });
+    const results: Record<string, unknown> = {};
+    for (const [key, journey] of entries) {
+        results[key] = journey ? { origin, destination, ...journey } : null;
+    }
+
+    if (!results.lessWalking && !results.lessTransit) {
+        return NextResponse.json({ error: "No route found" }, { status: 404 });
+    }
+
+    return NextResponse.json(results);
 }
