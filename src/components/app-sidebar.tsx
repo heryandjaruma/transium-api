@@ -54,7 +54,10 @@ export function AppSidebar() {
                             />
                         </SidebarMenuItem>
                         <SidebarMenuItem>
-                            <SidebarMenuButton>Badges</SidebarMenuButton>
+                            <SidebarMenuButton
+                                isActive={pathname === "/badges"}
+                                render={<Link href="/badges">Badges</Link>}
+                            />
                         </SidebarMenuItem>
                         <SidebarMenuItem>
                             <SidebarMenuButton>Action Definitions</SidebarMenuButton>

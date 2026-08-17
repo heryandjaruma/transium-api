@@ -1,11 +1,16 @@
-// Shared helpers for quest thumbnail media: R2 key layout, the public URL
-// mirrors the R2 key 1:1 (served by src/app/media/[...key]/route.ts), and
-// cleanup of Media rows that are no longer linked to any quest.
+// Shared helpers for media uploaded to the "transium" R2 bucket under
+// "media/system/...". The public URL mirrors the R2 key 1:1 (served by
+// src/app/media/[...key]/route.ts).
 
 export const QUEST_MEDIA_PREFIX = "media/system/quest"
+export const BADGE_MEDIA_PREFIX = "media/system/badge"
 
 export function questMediaKey(questId: string, filename: string) {
     return `${QUEST_MEDIA_PREFIX}/${questId}/${filename}`
+}
+
+export function badgeMediaKey(badgeId: string, filename: string) {
+    return `${BADGE_MEDIA_PREFIX}/${badgeId}/${filename}`
 }
 
 export function mediaUrlForKey(key: string) {
