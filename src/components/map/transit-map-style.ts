@@ -1,7 +1,5 @@
+import { BASEMAP_PMTILES_URL, TRANSIT_PMTILES_URL } from "@/lib/config"
 import type { StyleSpecification } from "maplibre-gl"
-
-export const BASEMAP_PMTILES_URL = "/tiles/bali-basemap.pmtiles"
-export const TRANSIT_PMTILES_URL = "/tiles/bali-transit.pmtiles"
 
 // Bounds and center pulled from each file's pmtiles header.
 export const BASEMAP_BOUNDS: [number, number, number, number] = [

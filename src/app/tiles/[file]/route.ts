@@ -1,11 +1,20 @@
+import { BASEMAP_PMTILES_URL, TRANSIT_PMTILES_URL } from "@/lib/config";
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 
 // Cloudflare Workers Static Assets (public/) doesn't honor Range requests,
 // which pmtiles' client relies on for lazy tile loading. R2 supports native
 // ranged reads, so tiles are served from there instead.
+//
+// TILE_KEYS maps the requested filename (the last path segment of the public
+// URLs in config.ts) to its R2 object key, which lives under the same
+// "tiles/" prefix in the "transium" bucket.
+function basename(publicUrl: string): string {
+    return publicUrl.slice(publicUrl.lastIndexOf("/") + 1)
+}
+
 const TILE_KEYS: Record<string, string> = {
-    "bali-basemap.pmtiles": "tiles/bali-basemap.pmtiles",
-    "bali-transit.pmtiles": "tiles/bali-transit.pmtiles",
+    [basename(BASEMAP_PMTILES_URL)]: `tiles/${basename(BASEMAP_PMTILES_URL)}`,
+    [basename(TRANSIT_PMTILES_URL)]: `tiles/${basename(TRANSIT_PMTILES_URL)}`,
 }
 
 type ParsedRange =
