@@ -35,7 +35,7 @@ export type BusSegment = {
     routeColor: string | null
     from: JourneyStop
     to: JourneyStop
-    stops: { stopId: string; name: string }[]
+    stops: { stopId: string; name: string; lat: number; lng: number }[]
     distanceMeters: number
     geometry: [number, number][]
 }

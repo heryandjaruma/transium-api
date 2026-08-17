@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import {
     Map as MaplibreMap,
+    Marker,
     NavigationControl,
     Popup,
     addProtocol,
@@ -144,14 +145,21 @@ function spacingForSegment(coords: [number, number][]) {
     return Math.min(220, Math.max(60, total / 5))
 }
 
-type ActivePoint = { lng: number; lat: number; role: "origin" | "destination" | "stop" }
+type ActivePoint = { lng: number; lat: number; role: "origin" | "destination" | "stop"; name?: string }
 
-/** Every stop this segment touches, so intermediate board/alight/transfer points get pinned too. */
-function segmentStopPoints(segment: JourneySegment): { stopId: string; lat: number; lng: number }[] {
+/**
+ * Every stop this segment touches. For bus legs this includes every stop the
+ * bus passes through (not just where the rider boards/alights), so the whole
+ * ride shows up as a string of labeled points along the route.
+ */
+function segmentStopPoints(segment: JourneySegment): { stopId: string; lat: number; lng: number; name: string }[] {
     if (segment.type === "walk") {
         return [segment.from, segment.to].filter(
             (p): p is typeof p & { stopId: string } => typeof p.stopId === "string"
         )
+    }
+    if (segment.type === "bus") {
+        return segment.stops.map((stop) => ({ stopId: stop.stopId, lat: stop.lat, lng: stop.lng, name: stop.name }))
     }
     return [segment.from, segment.to]
 }
@@ -204,6 +212,31 @@ export function TransitMap() {
             })
         }
 
+        // Text labels are plain DOM markers rather than a symbol layer: the
+        // style has no glyphs source configured (it's a self-contained
+        // pmtiles setup), so MapLibre can't render symbol text on its own.
+        let stopLabelMarkers: Marker[] = []
+
+        const clearStopLabels = () => {
+            for (const marker of stopLabelMarkers) marker.remove()
+            stopLabelMarkers = []
+        }
+
+        const setStopLabels = (points: ActivePoint[]) => {
+            clearStopLabels()
+            stopLabelMarkers = points
+                .filter((p) => p.role === "stop" && p.name)
+                .map((p) => {
+                    const el = document.createElement("div")
+                    el.className =
+                        "pointer-events-none select-none whitespace-nowrap rounded bg-white/90 px-1.5 py-0.5 text-[11px] font-medium leading-none text-slate-800 shadow-sm ring-1 ring-black/10"
+                    el.textContent = p.name!
+                    return new Marker({ element: el, anchor: "left", offset: [8, 0] })
+                        .setLngLat([p.lng, p.lat])
+                        .addTo(map)
+                })
+        }
+
         const setActiveRoute = (segments: JourneySegment[]) => {
             const source = map.getSource("active-route") as GeoJSONSource | undefined
             source?.setData({
@@ -242,14 +275,16 @@ export function TransitMap() {
             for (const segment of j.segments) {
                 for (const stop of segmentStopPoints(segment)) {
                     if (!points.has(stop.stopId)) {
-                        points.set(stop.stopId, { lng: stop.lng, lat: stop.lat, role: "stop" })
+                        points.set(stop.stopId, { lng: stop.lng, lat: stop.lat, role: "stop", name: stop.name })
                     }
                 }
             }
             // Origin/destination pins always win over a same-spot stop pin.
             points.set("__origin", { lng: j.origin.lng, lat: j.origin.lat, role: "origin" })
             points.set("__destination", { lng: j.destination.lng, lat: j.destination.lat, role: "destination" })
-            setActivePoints([...points.values()])
+            const activePoints = [...points.values()]
+            setActivePoints(activePoints)
+            setStopLabels(activePoints)
         }
 
         const reset = () => {
@@ -259,6 +294,7 @@ export function TransitMap() {
             setActivePoints([])
             setActiveRoute([])
             setActiveRouteArrows([])
+            clearStopLabels()
             setJourney(null)
             setStatus("Click the map to set your departure point")
         }
@@ -329,6 +365,7 @@ export function TransitMap() {
                 setJourney(null)
                 setActiveRoute([])
                 setActiveRouteArrows([])
+                clearStopLabels()
                 setActivePoints([{ lng: point.lng, lat: point.lat, role: "origin" }])
                 setStatus("Departure set — click the map for your destination")
                 return

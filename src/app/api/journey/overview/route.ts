@@ -115,10 +115,10 @@ function buildTransitLegs(
                 routeColor: route?.color ?? null,
                 from: { stopId: boardStopId, name: board.name, lat: board.lat, lng: board.lng },
                 to: { stopId: alightStopId, name: alight.name, lat: alight.lat, lng: alight.lng },
-                stops: path.slice(startIdx, j + 1).map((step) => ({
-                    stopId: step.stopId,
-                    name: stops.get(step.stopId)!.name,
-                })),
+                stops: path.slice(startIdx, j + 1).map((step) => {
+                    const stop = stops.get(step.stopId)!;
+                    return { stopId: step.stopId, name: stop.name, lat: stop.lat, lng: stop.lng };
+                }),
                 distanceMeters,
                 geometry,
             });

@@ -134,6 +134,21 @@ export const transitMapStyle: StyleSpecification = {
                 "line-opacity": 0.9,
             },
         },
+        // White halo drawn under the bus leg so it visibly pops off the thin,
+        // muted "bus-routes" tile layer instead of just blending into it,
+        // even when the route's own color is close to the base line color.
+        {
+            id: "active-route-bus-casing",
+            type: "line",
+            source: "active-route",
+            filter: ["==", ["get", "kind"], "bus"],
+            layout: { "line-join": "round", "line-cap": "round" },
+            paint: {
+                "line-color": "#ffffff",
+                "line-width": ["interpolate", ["linear"], ["zoom"], 6, 9, 10, 14, 14, 22, 18, 32],
+                "line-opacity": 0.95,
+            },
+        },
         {
             id: "active-route-bus",
             type: "line",
@@ -142,8 +157,8 @@ export const transitMapStyle: StyleSpecification = {
             layout: { "line-join": "round", "line-cap": "round" },
             paint: {
                 "line-color": ["coalesce", ["get", "color"], "#1a1a1a"],
-                "line-width": ["interpolate", ["linear"], ["zoom"], 8, 3, 14, 7],
-                "line-opacity": 0.9,
+                "line-width": ["interpolate", ["linear"], ["zoom"], 6, 6, 10, 10, 14, 16, 18, 24],
+                "line-opacity": 0.95,
             },
         },
         {
