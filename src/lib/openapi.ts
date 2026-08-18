@@ -1,8 +1,8 @@
 // OpenAPI document describing the public HTTP API. Served as JSON at
 // /api/openapi.json and rendered by Scalar at /reference.
 //
-// Only documents /api/astar, /api/journey/overview, and /api/maps/route for now —
-// add other paths here as they get documented.
+// Only documents /api/astar, /api/journey/overview, /api/maps/route, and the Quest-tagged
+// paths for now — add other paths here as they get documented.
 
 const journeyStepSchema = {
     description:
@@ -53,6 +53,16 @@ export const openApiSpec = {
         description: "Public transit routing API for Bali.",
     },
     servers: [{ url: "/api" }],
+    tags: [
+        {
+            name: "Quest",
+            description:
+                "Quests are the discoverable activities shown to end users, each carrying thumbnail media and " +
+                "one or more badges. A quest has no location of its own — it's reachable through any kelurahan " +
+                "that one of its badges is scoped to (Badge.kelurahanId), and its origin/destination coordinates " +
+                "for route preview come from its badges' step locations.",
+        },
+    ],
     components: {
         schemas: {
             JourneyStep: journeyStepSchema,
@@ -271,6 +281,121 @@ export const openApiSpec = {
                     steps: { type: "array", items: { $ref: "#/components/schemas/JourneyStep" } },
                 },
             },
+            LatLng: {
+                type: "object",
+                required: ["lat", "lng"],
+                properties: { lat: { type: "number" }, lng: { type: "number" } },
+            },
+            MediaAsset: {
+                type: "object",
+                required: ["id", "createdAt", "type", "url"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    createdAt: { type: "string", format: "date-time" },
+                    type: { type: "string", description: "MIME type, e.g. \"image/jpeg\"." },
+                    url: { type: "string" },
+                },
+            },
+            Quest: {
+                type: "object",
+                required: ["id", "name", "category", "description", "thumbnails"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    name: { type: "string" },
+                    category: { type: "string" },
+                    description: { type: "string" },
+                    thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
+                },
+            },
+            QuestBadgeEntry: {
+                description: "A badge attached to a quest via QuestBadge (`id` is the link's own id, not the badge's).",
+                type: "object",
+                required: ["id", "questId", "badgeId", "badgeName", "badgeCategory", "badgeType", "badgeImageUrl"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    questId: { type: "string", format: "uuid" },
+                    badgeId: { type: "string", format: "uuid" },
+                    badgeName: { type: "string" },
+                    badgeCategory: { type: "string" },
+                    badgeType: { type: "string" },
+                    badgeImageUrl: { type: ["string", "null"] },
+                },
+            },
+            BadgeActionStep: {
+                type: "object",
+                required: ["id", "badgeId", "actionId", "actionName", "actionType", "sequence", "lat", "lng", "instruction"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    badgeId: { type: "string", format: "uuid" },
+                    actionId: { type: "string", format: "uuid" },
+                    actionName: { type: "string" },
+                    actionType: { type: "string" },
+                    sequence: { type: "integer", description: "Order of this step within its badge, ascending." },
+                    lat: { type: ["number", "null"] },
+                    lng: { type: ["number", "null"] },
+                    instruction: { type: ["string", "null"] },
+                },
+            },
+            QuestBadgeWithSteps: {
+                type: "object",
+                required: ["id", "badgeId", "badgeName", "badgeCategory", "badgeType", "badgeImageUrl", "steps"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    badgeId: { type: "string", format: "uuid" },
+                    badgeName: { type: "string" },
+                    badgeCategory: { type: "string" },
+                    badgeType: { type: "string" },
+                    badgeImageUrl: { type: ["string", "null"] },
+                    steps: {
+                        type: "array",
+                        description: "Ordered by sequence ascending.",
+                        items: { $ref: "#/components/schemas/BadgeActionStep" },
+                    },
+                },
+            },
+            QuestDetail: {
+                type: "object",
+                required: ["id", "name", "category", "description", "thumbnails", "badges", "origin", "destination"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    name: { type: "string" },
+                    category: { type: "string" },
+                    description: { type: "string" },
+                    thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
+                    badges: { type: "array", items: { $ref: "#/components/schemas/QuestBadgeWithSteps" } },
+                    origin: {
+                        description:
+                            "The first step (across badges, in attachment order) that has a lat/lng set, or " +
+                            "null if none do. Pass straight through to /journey/overview's `origin` query param.",
+                        oneOf: [{ $ref: "#/components/schemas/LatLng" }, { type: "null" }],
+                    },
+                    destination: {
+                        description: "The last step with a lat/lng set, or null if fewer than two steps have coordinates.",
+                        oneOf: [{ $ref: "#/components/schemas/LatLng" }, { type: "null" }],
+                    },
+                },
+            },
+            QuestWithBadges: {
+                type: "object",
+                required: ["id", "name", "category", "description", "thumbnails", "badges"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    name: { type: "string" },
+                    category: { type: "string" },
+                    description: { type: "string" },
+                    thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
+                    badges: { type: "array", items: { $ref: "#/components/schemas/QuestBadgeEntry" } },
+                },
+            },
+            Kelurahan: {
+                type: "object",
+                required: ["id", "kelurahanName", "kecamatanName"],
+                properties: {
+                    id: { type: "string" },
+                    kelurahanName: { type: "string" },
+                    kecamatanName: { type: "string" },
+                },
+            },
         },
     },
     paths: {
@@ -471,6 +596,476 @@ export const openApiSpec = {
                                     noWalkToStop: { value: { error: "No walking route to boarding stop" } },
                                     noWalkFromStop: { value: { error: "No walking route from alighting stop" } },
                                 },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/quest": {
+            get: {
+                tags: ["Quest"],
+                summary: "List quests",
+                description: "Returns every quest with its thumbnail media.",
+                responses: {
+                    "200": {
+                        description: "Quests found.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["quests"],
+                                    properties: { quests: { type: "array", items: { $ref: "#/components/schemas/Quest" } } },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            // post: {
+            //     tags: ["Quest"],
+            //     summary: "Create a quest",
+            //     requestBody: {
+            //         required: true,
+            //         content: {
+            //             "application/json": {
+            //                 schema: {
+            //                     type: "object",
+            //                     required: ["name", "category", "description"],
+            //                     properties: {
+            //                         name: { type: "string" },
+            //                         category: { type: "string" },
+            //                         description: { type: "string" },
+            //                     },
+            //                 },
+            //             },
+            //         },
+            //     },
+            //     responses: {
+            //         "201": {
+            //             description: "Quest created, with an empty `thumbnails` array.",
+            //             content: {
+            //                 "application/json": {
+            //                     schema: { type: "object", required: ["quest"], properties: { quest: { $ref: "#/components/schemas/Quest" } } },
+            //                 },
+            //             },
+            //         },
+            //         "400": {
+            //             description: "Missing or invalid `name`/`category`/`description`.",
+            //             content: {
+            //                 "application/json": {
+            //                     schema: { type: "object", properties: { error: { type: "string" } } },
+            //                     example: { error: "Invalid arguments" },
+            //                 },
+            //             },
+            //         },
+            //     },
+            // },
+        },
+        "/quest/{id}": {
+            get: {
+                tags: ["Quest"],
+                summary: "Get a quest",
+                description:
+                    "Returns a quest with its thumbnails, attached badges (each with its ordered steps), and " +
+                    "`origin`/`destination` — the first and last badge step (in attachment order) that has a " +
+                    "lat/lng set. Pass those straight to /journey/overview to preview the quest's route.",
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+                responses: {
+                    "200": {
+                        description: "Quest found.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", required: ["quest"], properties: { quest: { $ref: "#/components/schemas/QuestDetail" } } },
+                                example: {
+                                    quest: {
+                                        id: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f",
+                                        name: "Sanur Street",
+                                        category: "Beaches",
+                                        description: "Where earlybirds relax",
+                                        thumbnails: [],
+                                        badges: [
+                                            {
+                                                id: "6fb84e99-5404-4c1a-b320-1fb027fbfc51",
+                                                badgeId: "b0564b3e-4fb4-4790-82f6-ff820dbe5f8b",
+                                                badgeName: "Sanoored",
+                                                badgeCategory: "Explore",
+                                                badgeType: "quest",
+                                                badgeImageUrl: null,
+                                                steps: [
+                                                    {
+                                                        id: "57585fca-523c-47fc-8db7-f3d0e408dff7",
+                                                        badgeId: "b0564b3e-4fb4-4790-82f6-ff820dbe5f8b",
+                                                        actionId: "02115d76-7951-44d4-a2e5-a62bfc37dcfc",
+                                                        actionName: "Walk",
+                                                        actionType: "required",
+                                                        sequence: 1,
+                                                        lat: -8.6788,
+                                                        lng: 115.2622,
+                                                        instruction: "Walk to Taman Kencana",
+                                                    },
+                                                    {
+                                                        id: "c5f26f71-9166-4122-a6b0-9930e1ef8225",
+                                                        badgeId: "b0564b3e-4fb4-4790-82f6-ff820dbe5f8b",
+                                                        actionId: "c06478e1-650d-4eee-a55b-41009cd0878e",
+                                                        actionName: "Take Picture",
+                                                        actionType: "optional",
+                                                        sequence: 2,
+                                                        lat: -8.6705,
+                                                        lng: 115.2646,
+                                                        instruction: null,
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                        origin: { lat: -8.6788, lng: 115.2622 },
+                                        destination: { lat: -8.6705, lng: 115.2646 },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No quest with this id.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Quest not found" },
+                            },
+                        },
+                    },
+                },
+            },
+            // patch: {
+            //     tags: ["Quest"],
+            //     summary: "Update a quest",
+            //     description: "Body may include any of `name`/`category`/`description`. Returns the same shape as GET.",
+            //     parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+            //     requestBody: {
+            //         required: true,
+            //         content: {
+            //             "application/json": {
+            //                 schema: {
+            //                     type: "object",
+            //                     properties: {
+            //                         name: { type: "string" },
+            //                         category: { type: "string" },
+            //                         description: { type: "string" },
+            //                     },
+            //                 },
+            //             },
+            //         },
+            //     },
+            //     responses: {
+            //         "200": {
+            //             description: "Quest updated.",
+            //             content: {
+            //                 "application/json": {
+            //                     schema: { type: "object", required: ["quest"], properties: { quest: { $ref: "#/components/schemas/QuestDetail" } } },
+            //                 },
+            //             },
+            //         },
+            //         "400": {
+            //             description: "No updatable fields provided, or one provided as an invalid value.",
+            //             content: {
+            //                 "application/json": {
+            //                     schema: { type: "object", properties: { error: { type: "string" } } },
+            //                     examples: {
+            //                         invalid: { value: { error: "Invalid arguments" } },
+            //                         empty: { value: { error: "No fields to update" } },
+            //                     },
+            //                 },
+            //             },
+            //         },
+            //         "404": {
+            //             description: "No quest with this id.",
+            //             content: {
+            //                 "application/json": {
+            //                     schema: { type: "object", properties: { error: { type: "string" } } },
+            //                     example: { error: "Quest not found" },
+            //                 },
+            //             },
+            //         },
+            //     },
+            // },
+            // delete: {
+            //     tags: ["Quest"],
+            //     summary: "Delete a quest",
+            //     description:
+            //         "Deletes the quest, its QuestMedia/QuestBadge links, and any thumbnails no longer used elsewhere.",
+            //     parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+            //     responses: {
+            //         "204": { description: "Quest deleted." },
+            //         "404": {
+            //             description: "No quest with this id.",
+            //             content: {
+            //                 "application/json": {
+            //                     schema: { type: "object", properties: { error: { type: "string" } } },
+            //                     example: { error: "Quest not found" },
+            //                 },
+            //             },
+            //         },
+            //     },
+            // },
+        },
+        "/quest/{id}/badges": {
+            get: {
+                tags: ["Quest"],
+                summary: "List a quest's badges",
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+                responses: {
+                    "200": {
+                        description: "Badges attached to this quest.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["questBadges"],
+                                    properties: { questBadges: { type: "array", items: { $ref: "#/components/schemas/QuestBadgeEntry" } } },
+                                },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No quest with this id.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Quest not found" },
+                            },
+                        },
+                    },
+                },
+            },
+            // post: {
+            //     tags: ["Quest"],
+            //     summary: "Attach a badge to a quest",
+            //     parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+            //     requestBody: {
+            //         required: true,
+            //         content: {
+            //             "application/json": {
+            //                 schema: { type: "object", required: ["badgeId"], properties: { badgeId: { type: "string", format: "uuid" } } },
+            //             },
+            //         },
+            //     },
+            //     responses: {
+            //         "201": {
+            //             description: "Badge attached.",
+            //             content: {
+            //                 "application/json": {
+            //                     schema: { type: "object", required: ["questBadge"], properties: { questBadge: { $ref: "#/components/schemas/QuestBadgeEntry" } } },
+            //                 },
+            //             },
+            //         },
+            //         "400": {
+            //             description: "Missing or invalid `badgeId`.",
+            //             content: {
+            //                 "application/json": {
+            //                     schema: { type: "object", properties: { error: { type: "string" } } },
+            //                     example: { error: "Invalid badgeId" },
+            //                 },
+            //             },
+            //         },
+            //         "404": {
+            //             description: "No quest or badge with this id.",
+            //             content: {
+            //                 "application/json": {
+            //                     schema: { type: "object", properties: { error: { type: "string" } } },
+            //                     examples: {
+            //                         quest: { value: { error: "Quest not found" } },
+            //                         badge: { value: { error: "Badge not found" } },
+            //                     },
+            //                 },
+            //             },
+            //         },
+            //         "409": {
+            //             description: "This badge is already attached to this quest.",
+            //             content: {
+            //                 "application/json": {
+            //                     schema: { type: "object", properties: { error: { type: "string" } } },
+            //                     example: { error: "This badge is already attached to this quest" },
+            //                 },
+            //             },
+            //         },
+            //     },
+            // },
+        },
+        // "/quest/{id}/badges/{badgeId}": {
+        //     delete: {
+        //         tags: ["Quest"],
+        //         summary: "Detach a badge from a quest",
+        //         parameters: [
+        //             { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        //             { name: "badgeId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        //         ],
+        //         responses: {
+        //             "204": { description: "Badge detached." },
+        //             "404": {
+        //                 description: "This badge is not attached to this quest.",
+        //                 content: {
+        //                     "application/json": {
+        //                         schema: { type: "object", properties: { error: { type: "string" } } },
+        //                         example: { error: "This badge is not attached to this quest" },
+        //                     },
+        //                 },
+        //             },
+        //         },
+        //     },
+        // },
+        // "/quest/media": {
+        //     post: {
+        //         tags: ["Quest"],
+        //         summary: "Upload a quest thumbnail",
+        //         description:
+        //             "Uploads a thumbnail image to R2 and links it to a quest. Accepts image/png, image/jpeg, " +
+        //             "image/webp, or image/gif up to 8 MB.",
+        //         requestBody: {
+        //             required: true,
+        //             content: {
+        //                 "multipart/form-data": {
+        //                     schema: {
+        //                         type: "object",
+        //                         required: ["questId", "file"],
+        //                         properties: {
+        //                             questId: { type: "string", format: "uuid" },
+        //                             file: { type: "string", format: "binary" },
+        //                         },
+        //                     },
+        //                 },
+        //             },
+        //         },
+        //         responses: {
+        //             "201": {
+        //                 description: "Thumbnail uploaded and linked.",
+        //                 content: {
+        //                     "application/json": {
+        //                         schema: { type: "object", required: ["media"], properties: { media: { $ref: "#/components/schemas/MediaAsset" } } },
+        //                     },
+        //                 },
+        //             },
+        //             "400": {
+        //                 description: "Missing `questId`/`file`, or the file is an unsupported type or too large.",
+        //                 content: {
+        //                     "application/json": {
+        //                         schema: { type: "object", properties: { error: { type: "string" } } },
+        //                         examples: {
+        //                             missingQuestId: { value: { error: "Missing questId" } },
+        //                             missingFile: { value: { error: "Missing file" } },
+        //                             unsupportedType: { value: { error: "Unsupported file type" } },
+        //                             tooLarge: { value: { error: "File too large" } },
+        //                         },
+        //                     },
+        //                 },
+        //             },
+        //             "404": {
+        //                 description: "No quest with this id.",
+        //                 content: {
+        //                     "application/json": {
+        //                         schema: { type: "object", properties: { error: { type: "string" } } },
+        //                         example: { error: "Quest not found" },
+        //                     },
+        //                 },
+        //             },
+        //         },
+        //     },
+        //     delete: {
+        //         tags: ["Quest"],
+        //         summary: "Detach a quest thumbnail",
+        //         description: "Detaches a thumbnail from a quest, deleting the underlying file if no other quest uses it.",
+        //         parameters: [
+        //             { name: "questId", in: "query", required: true, schema: { type: "string", format: "uuid" } },
+        //             { name: "mediaId", in: "query", required: true, schema: { type: "string", format: "uuid" } },
+        //         ],
+        //         responses: {
+        //             "204": { description: "Thumbnail detached." },
+        //             "400": {
+        //                 description: "Missing `questId` or `mediaId`.",
+        //                 content: {
+        //                     "application/json": {
+        //                         schema: { type: "object", properties: { error: { type: "string" } } },
+        //                         example: { error: "Missing questId or mediaId" },
+        //                     },
+        //                 },
+        //             },
+        //             "404": {
+        //                 description: "No thumbnail link for this questId/mediaId pair.",
+        //                 content: {
+        //                     "application/json": {
+        //                         schema: { type: "object", properties: { error: { type: "string" } } },
+        //                         example: { error: "Thumbnail not found" },
+        //                     },
+        //                 },
+        //             },
+        //         },
+        //     },
+        // },
+        "/kelurahan/quests": {
+            get: {
+                tags: ["Quest"],
+                summary: "List quests grouped by kelurahan",
+                description:
+                    "Returns each kelurahan that has at least one reachable quest (a quest with a badge scoped " +
+                    "to it via Badge.kelurahanId), paired with those quests. Kelurahans with no quests are " +
+                    "omitted. A quest can appear under more than one kelurahan if its badges span several.",
+                responses: {
+                    "200": {
+                        description: "Groups found.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["groups"],
+                                    properties: {
+                                        groups: {
+                                            type: "array",
+                                            items: {
+                                                type: "object",
+                                                required: ["kelurahan", "quests"],
+                                                properties: {
+                                                    kelurahan: { $ref: "#/components/schemas/Kelurahan" },
+                                                    quests: { type: "array", items: { $ref: "#/components/schemas/Quest" } },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/kelurahan/{id}/quests": {
+            get: {
+                tags: ["Quest"],
+                summary: "List a kelurahan's quests",
+                description:
+                    "Returns the quests reachable in this kelurahan (quests with at least one badge scoped to " +
+                    "it), each with its thumbnails and all of its attached badges.",
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+                responses: {
+                    "200": {
+                        description: "Kelurahan and its quests.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["kelurahan", "quests"],
+                                    properties: {
+                                        kelurahan: { $ref: "#/components/schemas/Kelurahan" },
+                                        quests: { type: "array", items: { $ref: "#/components/schemas/QuestWithBadges" } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No kelurahan with this id.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Kelurahan not found" },
                             },
                         },
                     },
