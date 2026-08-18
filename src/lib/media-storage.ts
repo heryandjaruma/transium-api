@@ -19,6 +19,10 @@ export function journeyMediaKey(userId: string, journeyAttemptId: string, filena
     return `${USER_JOURNEY_MEDIA_PREFIX}/${userId}/journey/${journeyAttemptId}/${filename}`
 }
 
+export function userAvatarKey(userId: string, filename: string) {
+    return `${USER_JOURNEY_MEDIA_PREFIX}/${userId}/avatar/${filename}`
+}
+
 export function mediaUrlForKey(key: string) {
     return `/${key}`
 }

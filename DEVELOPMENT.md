@@ -62,3 +62,14 @@ Header: Authorization: Bearer debug-token-123
 | POST   | `/api/private/journey/media`   | Upload a photo for a journey step. Form fields: `journeyStepId`, `file`.       |
 
 Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Journey" tag.
+
+### Profile endpoints
+
+| Method | Path                          | Purpose                                                                        |
+| ------ | ------------------------------ | --------------------------------------------------------------------------------- |
+| GET    | `/api/private/profile/{id}`    | Get the caller's own profile. `id` must be the caller's own user id.           |
+| PATCH  | `/api/private/profile/{id}`    | Update `firstName`/`lastName` on the caller's own profile.                     |
+| POST   | `/api/private/profile/media`   | Upload the caller's avatar, setting `user.image`. Form field: `file`.          |
+| DELETE | `/api/private/profile/media`   | Remove the caller's avatar.                                                     |
+
+Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Profile" tag.
