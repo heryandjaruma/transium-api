@@ -58,7 +58,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ badge });
 }
 
-/** Deletes a badge and its uploaded image, if any. */
+/** Deletes a badge, its steps, and its uploaded image, if any. */
 export async function DELETE(_request: NextRequest, { params }: Params) {
     const { id } = await params;
     const { env } = getCloudflareContext();
@@ -66,7 +66,10 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     const existing = await env.DB.prepare(`SELECT id, imageUrl FROM Badge WHERE id = ?`).bind(id).first<{ id: string; imageUrl: string | null }>();
     if (!existing) return NextResponse.json({ error: "Badge not found" }, { status: 404 });
 
-    await env.DB.prepare(`DELETE FROM Badge WHERE id = ?`).bind(id).run();
+    await env.DB.batch([
+        env.DB.prepare(`DELETE FROM BadgeAction WHERE badgeId = ?`).bind(id),
+        env.DB.prepare(`DELETE FROM Badge WHERE id = ?`).bind(id),
+    ]);
     if (existing.imageUrl) {
         await env.TILES_BUCKET.delete(r2KeyFromMediaUrl(existing.imageUrl));
     }

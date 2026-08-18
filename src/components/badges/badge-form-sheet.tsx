@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
 import { BadgeImage } from "@/components/badges/badge-image"
+import { BadgeSteps } from "@/components/badges/badge-steps"
 import type { Badge } from "@/lib/badge"
 
 type Props = {
@@ -139,6 +140,13 @@ export function BadgeFormSheet({ open, onOpenChange, badge, onSaved }: Props) {
                         <div className="flex flex-col gap-1.5 border-t border-border pt-4">
                             <Label>Image</Label>
                             <BadgeImage badgeId={savedBadge.id} imageUrl={savedBadge.imageUrl} onChange={handleImageChange} />
+                        </div>
+                    )}
+
+                    {savedBadge && (
+                        <div className="flex flex-col gap-1.5 border-t border-border pt-4">
+                            <Label>Steps</Label>
+                            <BadgeSteps badgeId={savedBadge.id} />
                         </div>
                     )}
                 </form>
