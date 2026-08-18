@@ -49,7 +49,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     const { env } = getCloudflareContext();
     const profile = await getOrCreateProfile(env.DB, session.user.id, session.user.name);
 
-    return NextResponse.json({ profile: { ...profile, image: session.user.image ?? null } });
+    return NextResponse.json({ profile: { ...profile, image: session.user.image ?? null, email: session.user.email ?? null } });
 }
 
 /**
@@ -100,5 +100,5 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const profile = await env.DB.prepare(SELECT_PROFILE).bind(session.user.id).first<ProfileRow>();
     if (!profile) return NextResponse.json({ error: "Profile not found" }, { status: 404 });
 
-    return NextResponse.json({ profile: { ...profile, image: session.user.image ?? null } });
+    return NextResponse.json({ profile: { ...profile, image: session.user.image ?? null, email: session.user.email ?? null } });
 }

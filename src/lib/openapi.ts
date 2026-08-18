@@ -481,7 +481,7 @@ export const openApiSpec = {
             },
             Profile: {
                 type: "object",
-                required: ["id", "userId", "firstName", "lastName", "level", "image"],
+                required: ["id", "userId", "firstName", "lastName", "level", "image", "email"],
                 properties: {
                     id: { type: "string", format: "uuid" },
                     userId: { type: "string" },
@@ -492,6 +492,7 @@ export const openApiSpec = {
                         type: ["string", "null"],
                         description: "The Better Auth user's `image` (avatar URL). Set via POST/DELETE /private/profile/media.",
                     },
+                    email: { type: "string", format: "email", description: "The Better Auth user's `email`. Not editable through this endpoint." },
                 },
             },
             PlaceSuggestion: {
