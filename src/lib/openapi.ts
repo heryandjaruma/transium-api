@@ -839,6 +839,74 @@ export const openApiSpec = {
                 },
             },
         },
+        "/private/journey/media": {
+            post: {
+                tags: ["Journey"],
+                summary: "Upload a photo for a journey step",
+                description:
+                    "Uploads a photo to R2 (under `media/user/<userId>/journey/<journeyAttemptId>/`) and links " +
+                    "it to a JourneyStep via JourneyMedia. `journeyAttemptId` is derived from `journeyStepId`, " +
+                    "which must belong to one of the caller's own journey attempts.",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "multipart/form-data": {
+                            schema: {
+                                type: "object",
+                                required: ["journeyStepId", "file"],
+                                properties: {
+                                    journeyStepId: { type: "string", format: "uuid" },
+                                    file: { type: "string", format: "binary", description: "image/png, image/jpeg, image/webp, or image/gif, up to 8 MB." },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    "201": {
+                        description: "Photo uploaded and linked.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", required: ["media"], properties: { media: { $ref: "#/components/schemas/MediaAsset" } } },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Missing/invalid `journeyStepId`, missing/unsupported/oversized `file`.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                examples: {
+                                    missingStep: { value: { error: "Missing journeyStepId" } },
+                                    missingFile: { value: { error: "Missing file" } },
+                                    unsupportedType: { value: { error: "Unsupported file type" } },
+                                    tooLarge: { value: { error: "File too large" } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No journey step with this id belonging to the caller.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Journey step not found" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
         "/quest": {
             get: {
                 tags: ["Quest"],
