@@ -481,13 +481,17 @@ export const openApiSpec = {
             },
             Profile: {
                 type: "object",
-                required: ["id", "userId", "firstName", "lastName", "level"],
+                required: ["id", "userId", "firstName", "lastName", "level", "image"],
                 properties: {
                     id: { type: "string", format: "uuid" },
                     userId: { type: "string" },
                     firstName: { type: "string" },
                     lastName: { type: ["string", "null"] },
                     level: { type: "integer", description: "Not user-editable via PATCH /private/profile/{id}." },
+                    image: {
+                        type: ["string", "null"],
+                        description: "The Better Auth user's `image` (avatar URL). Set via POST/DELETE /private/profile/media.",
+                    },
                 },
             },
             PlaceSuggestion: {
@@ -1063,6 +1067,15 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 example: { error: "Forbidden" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "The Profile row disappeared between creation and this response (should not happen in practice).",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Profile not found" },
                             },
                         },
                     },
