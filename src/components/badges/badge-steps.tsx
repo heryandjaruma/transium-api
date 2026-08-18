@@ -305,12 +305,19 @@ function StepFormRow({
     onSubmit: () => void
     submitLabel: string
 }) {
+    // Select.Value can't resolve a label from an unopened popup on its own — an
+    // explicit items map lets it show the right label immediately (e.g. when editing
+    // an existing step, before the user has ever opened this dropdown).
+    const actionItems: Record<string, string> = {}
+    for (const action of actionDefinitions) actionItems[action.id] = action.name
+
     return (
         <div className="flex flex-col gap-2 bg-muted/30 px-3 py-3">
             <div className="flex flex-wrap gap-2">
                 <Select
                     value={form.actionId || null}
                     onValueChange={(value) => setForm((f) => ({ ...f, actionId: (value as string) ?? "" }))}
+                    items={actionItems}
                 >
                     <SelectTrigger size="sm" className="min-w-40 flex-1">
                         <SelectValue placeholder="Choose an action" />

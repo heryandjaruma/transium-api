@@ -68,7 +68,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ quest: await getQuestWithThumbnails(env.DB, id) });
 }
 
-/** Deletes a quest, its QuestMedia links, and any thumbnails no longer used elsewhere. */
+/** Deletes a quest, its QuestMedia/QuestBadge links, and any thumbnails no longer used elsewhere. */
 export async function DELETE(_request: NextRequest, { params }: Params) {
     const { id } = await params;
     const { env } = getCloudflareContext();
@@ -80,6 +80,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
 
     await env.DB.batch([
         env.DB.prepare(`DELETE FROM QuestMedia WHERE questId = ?`).bind(id),
+        env.DB.prepare(`DELETE FROM QuestBadge WHERE questId = ?`).bind(id),
         env.DB.prepare(`DELETE FROM Quest WHERE id = ?`).bind(id),
     ]);
 

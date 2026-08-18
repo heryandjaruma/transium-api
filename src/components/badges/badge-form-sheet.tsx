@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
     Sheet,
     SheetClose,
@@ -18,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BadgeImage } from "@/components/badges/badge-image"
 import { BadgeSteps } from "@/components/badges/badge-steps"
 import type { Badge } from "@/lib/badge"
+import type { Kelurahan } from "@/lib/kelurahan"
 
 type Props = {
     open: boolean
@@ -27,7 +29,11 @@ type Props = {
     onSaved: (badge: Badge) => void
 }
 
-const emptyForm = { name: "", category: "", description: "", type: "" }
+// Base UI's Select can't hold a real `null` item value alongside string ids, so an
+// explicit sentinel represents "no kelurahan" and is converted to/from null at the edges.
+const NO_KELURAHAN = "__none__"
+
+const emptyForm = { name: "", category: "", description: "", type: "", kelurahanId: NO_KELURAHAN }
 
 /** Create/edit sheet for a badge. Once the badge exists (editing, or just created), also manages its image. */
 export function BadgeFormSheet({ open, onOpenChange, badge, onSaved }: Props) {
@@ -35,17 +41,53 @@ export function BadgeFormSheet({ open, onOpenChange, badge, onSaved }: Props) {
     const [form, setForm] = useState(emptyForm)
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [kelurahans, setKelurahans] = useState<Kelurahan[] | null>(null)
 
     useEffect(() => {
         if (!open) return
         setSavedBadge(badge)
         setForm(
             badge
-                ? { name: badge.name, category: badge.category, description: badge.description, type: badge.type }
+                ? {
+                      name: badge.name,
+                      category: badge.category,
+                      description: badge.description,
+                      type: badge.type,
+                      kelurahanId: badge.kelurahanId ?? NO_KELURAHAN,
+                  }
                 : emptyForm
         )
         setError(null)
     }, [open, badge])
+
+    useEffect(() => {
+        if (!open) return
+        let cancelled = false
+        fetch("/api/kelurahan")
+            .then((res) => res.json<{ kelurahans?: Kelurahan[] }>())
+            .then((data) => {
+                if (!cancelled) setKelurahans(data?.kelurahans ?? [])
+            })
+            .catch((err) => {
+                if (!cancelled) {
+                    console.error("Failed to load kelurahans:", err)
+                    setKelurahans([])
+                }
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [open])
+
+    // Select.Value can't resolve a label from an unopened popup on its own — an
+    // explicit items map lets it show the right label immediately.
+    const kelurahanItems = useMemo(() => {
+        const items: Record<string, string> = { [NO_KELURAHAN]: "No kelurahan" }
+        for (const kelurahan of kelurahans ?? []) {
+            items[kelurahan.id] = `${kelurahan.kelurahanName} (${kelurahan.kecamatanName})`
+        }
+        return items
+    }, [kelurahans])
 
     const isEditing = savedBadge !== null
 
@@ -62,7 +104,10 @@ export function BadgeFormSheet({ open, onOpenChange, badge, onSaved }: Props) {
             const res = await fetch(isEditing ? `/api/badge/${savedBadge!.id}` : "/api/badge", {
                 method: isEditing ? "PATCH" : "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(form),
+                body: JSON.stringify({
+                    ...form,
+                    kelurahanId: form.kelurahanId === NO_KELURAHAN ? null : form.kelurahanId,
+                }),
             })
             const data = await res.json<{ badge?: Badge; error?: string }>().catch(() => null)
             if (!res.ok || !data?.badge) {
@@ -123,6 +168,26 @@ export function BadgeFormSheet({ open, onOpenChange, badge, onSaved }: Props) {
                             onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
                             disabled={saving}
                         />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                        <Label htmlFor="badge-kelurahan">Kelurahan (optional)</Label>
+                        <Select
+                            value={form.kelurahanId}
+                            onValueChange={(value) => setForm((f) => ({ ...f, kelurahanId: (value as string) ?? NO_KELURAHAN }))}
+                            items={kelurahanItems}
+                        >
+                            <SelectTrigger id="badge-kelurahan" disabled={saving || kelurahans === null} className="w-full">
+                                <SelectValue placeholder="No kelurahan" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value={NO_KELURAHAN}>No kelurahan</SelectItem>
+                                {(kelurahans ?? []).map((kelurahan) => (
+                                    <SelectItem key={kelurahan.id} value={kelurahan.id}>
+                                        {kelurahan.kelurahanName} ({kelurahan.kecamatanName})
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                     </div>
                     <div className="flex flex-col gap-1.5">
                         <Label htmlFor="badge-description">Description</Label>

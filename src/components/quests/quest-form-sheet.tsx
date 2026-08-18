@@ -15,6 +15,7 @@ import {
     SheetTitle,
 } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
+import { QuestBadges } from "@/components/quests/quest-badges"
 import { QuestThumbnails } from "@/components/quests/quest-thumbnails"
 import type { Quest } from "@/lib/quest"
 
@@ -130,6 +131,13 @@ export function QuestFormSheet({ open, onOpenChange, quest, onSaved }: Props) {
                                 thumbnails={savedQuest.thumbnails}
                                 onChange={handleThumbnailsChange}
                             />
+                        </div>
+                    )}
+
+                    {savedQuest && (
+                        <div className="flex flex-col gap-1.5 border-t border-border pt-4">
+                            <Label>Badges</Label>
+                            <QuestBadges questId={savedQuest.id} />
                         </div>
                     )}
                 </form>

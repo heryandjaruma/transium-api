@@ -5,4 +5,5 @@ export type Badge = {
     description: string
     type: string
     imageUrl: string | null
+    kelurahanId: string | null
 }
