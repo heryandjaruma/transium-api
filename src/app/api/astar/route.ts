@@ -1,22 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { buildGraph } from "@/lib/bus-graph";
-import { astar } from "@/lib/astar";
+import { astar, CostWeights } from "@/lib/astar";
 import { loadRouteShapes, withLegGeometry } from "@/lib/route-geometry";
-import { ROUTE_PROFILES, summarizePath } from "@/lib/path-cost";
-
-type PathStep = { stopId: string; via: { kind: "ride" | "transfer"; inVehicleTime: number; walkingTime: number; waitingTime: number } | null }
+import { ROUTE_PROFILES, pathSignature, stepsFromPath, summarizePath } from "@/lib/path-cost";
 
 /**
- * Return the path between `from` and `to`, once optimised for less walking and once
+ * Return the path between `from` and `to`, optimised once for less walking and once
  * for fewer transit transfers.
  * @param Request
- * @returns Object with `lessWalking` and `lessTransit` fields, each (or `null` if no
- * route exists under that profile) containing `path` and a `cost` breakdown.
+ * @returns `{ alternativesAvailable, best, lessWalking?, lessTransit? }`. `best` is
+ * always present — it's the lessWalking result when the two profiles land on the same
+ * physical path, in which case `alternativesAvailable` is `false` and `lessWalking`/
+ * `lessTransit` are omitted. When the profiles genuinely differ, `alternativesAvailable`
+ * is `true` and both `lessWalking` and `lessTransit` are included alongside `best`
+ * (which defaults to the lessWalking result).
  * Example like below.
  * ```json
  * {
- *   "lessWalking": {
+ *   "alternativesAvailable": true,
+ *   "best": {
  *     "path": [{
  *       "stopId": "cd2cca12-9be9-5328-b476-4ea7e0cc7c08",
  *       "name": "BNDCC",
@@ -37,9 +40,15 @@ type PathStep = { stopId: string; via: { kind: "ride" | "transfer"; inVehicleTim
  *       "numTransfers": 1,
  *       "totalSeconds": 1226.4,
  *       "weightedCost": 1673.5
- *     }
+ *     },
+ *     "steps": [
+ *       { "type": "walk", "durationMinutes": 4 },
+ *       { "type": "ride", "routeRef": "K5B", "routeName": "Kuta - Ubud", "durationMinutes": 12 },
+ *       { "type": "walk", "durationMinutes": 2 }
+ *     ]
  *   },
- *   "lessTransit": { "...": "same shape" }
+ *   "lessWalking": { "...": "same shape as best" },
+ *   "lessTransit": { "...": "same shape as best" }
  * }
  * ```
  * `kind` can be `ride` or `transfer`. `geometry` is the road-following path for this
@@ -68,31 +77,49 @@ export async function GET(request: NextRequest) {
     }
 
     const routeShapes = await loadRouteShapes(env.DB)
+    const routesRes = await env.DB.prepare(`SELECT id, ref, name FROM BusRoute`).all()
+    const routesById = new Map(
+        (routesRes.results as any[]).map((r) => [r.id as string, r as { ref: string; name: string }])
+    )
 
-    const results: Record<string, unknown> = {}
-    for (const [key, weights] of Object.entries(ROUTE_PROFILES)) {
-        const path = astar(graph, stops, from, to, weights)
-        if (!path) {
-            results[key] = null
-            continue
-        }
+    function buildProfile(weights: CostWeights) {
+        const path = astar(graph, stops, from!, to!, weights)
+        if (!path) return null
 
         const pathWithGeometry = withLegGeometry(path, stops, routeShapes)
         const boardsAVehicle = path.some((step) => step.via?.kind === "ride")
-        const initialWaitSeconds = boardsAVehicle ? (stopWaitSeconds.get(from) ?? 0) : 0
+        const initialWaitSeconds = boardsAVehicle ? (stopWaitSeconds.get(from!) ?? 0) : 0
 
-        results[key] = {
-            path: pathWithGeometry.map((step) => ({
-                stopId: step.stopId,
-                name: stops.get(step.stopId)?.name,
-                via: step.via,
-            })),
-            cost: summarizePath(path as PathStep[], weights, initialWaitSeconds),
+        return {
+            signature: pathSignature(path),
+            result: {
+                path: pathWithGeometry.map((step) => ({
+                    stopId: step.stopId,
+                    name: stops.get(step.stopId)?.name,
+                    via: step.via,
+                })),
+                cost: summarizePath(path, weights, initialWaitSeconds),
+                steps: stepsFromPath(path, routesById),
+            },
         }
     }
 
-    if (!results.lessWalking && !results.lessTransit) {
+    const lessWalking = buildProfile(ROUTE_PROFILES.lessWalking)
+    const lessTransit = buildProfile(ROUTE_PROFILES.lessTransit)
+
+    if (!lessWalking && !lessTransit) {
         return NextResponse.json({ error: "No route found" }, { status: 404 })
+    }
+
+    const alternativesAvailable = !!lessWalking && !!lessTransit && lessWalking.signature !== lessTransit.signature
+
+    const results: Record<string, unknown> = {
+        alternativesAvailable,
+        best: (lessWalking ?? lessTransit)!.result,
+    }
+    if (alternativesAvailable) {
+        results.lessWalking = lessWalking!.result
+        results.lessTransit = lessTransit!.result
     }
 
     return NextResponse.json(results)

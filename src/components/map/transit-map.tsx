@@ -20,7 +20,14 @@ import {
     transitMapStyle,
 } from "@/components/map/transit-map-style"
 import { JourneyPanel } from "@/components/map/journey-panel"
-import type { JourneyAlternatives, JourneyOverview, JourneySegment, LatLng, RouteProfileKey } from "@/lib/journey"
+import type {
+    JourneyAlternatives,
+    JourneyOverview,
+    JourneyOverviewResponse,
+    JourneySegment,
+    LatLng,
+    RouteProfileKey,
+} from "@/lib/journey"
 
 let pmtilesProtocolRegistered = false
 
@@ -332,10 +339,10 @@ export function TransitMap() {
                 const res = await fetch(
                     `/api/journey/overview?origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}`
                 )
-                const data = (await res.json()) as JourneyAlternatives & { error?: string }
+                const data = (await res.json()) as JourneyOverviewResponse & { error?: string }
                 if (thisRequest !== requestId) return // superseded by a newer click/reset
 
-                if (!res.ok || (!data.lessWalking && !data.lessTransit)) {
+                if (!res.ok || !data.best) {
                     setJourney(null)
                     setAlternatives(null)
                     setActiveRoute([])
@@ -344,9 +351,20 @@ export function TransitMap() {
                     return
                 }
 
-                currentAlternatives = data
-                setAlternatives(data)
-                applySelection("lessWalking")
+                // Alternatives are only worth offering a switch for when the two
+                // profiles genuinely differ — otherwise `best` already covers it.
+                currentAlternatives = data.alternativesAvailable
+                    ? { lessWalking: data.lessWalking ?? null, lessTransit: data.lessTransit ?? null }
+                    : null
+                setAlternatives(currentAlternatives)
+
+                if (currentAlternatives) {
+                    applySelection("lessWalking")
+                } else {
+                    setSelectedProfile("lessWalking")
+                    setJourney(data.best)
+                    renderJourney(data.best)
+                }
                 setStatus("Click the map to plan a new journey")
             } catch (err) {
                 console.error("Failed to fetch journey overview:", err)

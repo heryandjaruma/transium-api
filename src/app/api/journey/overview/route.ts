@@ -4,7 +4,8 @@ import { getDirections } from "@/lib/apple-maps";
 import { buildGraph, haversine, Edge, WALK_SPEED_MPS } from "@/lib/bus-graph";
 import { astar, CostWeights } from "@/lib/astar";
 import { loadRouteShapes, withLegGeometry } from "@/lib/route-geometry";
-import { ROUTE_PROFILES, RouteProfileKey, summarizePath } from "@/lib/path-cost";
+import { ROUTE_PROFILES, pathSignature, summarizePath } from "@/lib/path-cost";
+import type { JourneyStep } from "@/lib/journey";
 
 type LatLng = { lat: number; lng: number };
 type LngLat = [number, number];
@@ -90,9 +91,11 @@ function buildTransitLegs(
             const startIdx = i;
             const geometry: LngLat[] = [];
             let j = i;
+            let durationSeconds = 0;
             while (j < path.length - 1 && path[j].via?.kind === "ride" && path[j].via?.routeId === routeId) {
                 const segGeometry = path[j].via!.geometry;
                 geometry.push(...(geometry.length ? segGeometry.slice(1) : segGeometry));
+                durationSeconds += path[j].via!.inVehicleTime;
                 j++;
             }
 
@@ -118,6 +121,7 @@ function buildTransitLegs(
                     return { stopId: step.stopId, name: stop.name, lat: stop.lat, lng: stop.lng };
                 }),
                 distanceMeters,
+                durationSeconds,
                 geometry,
             });
             i = j;
@@ -132,6 +136,7 @@ function buildTransitLegs(
                 from: { stopId: fromStopId, name: from.name, lat: from.lat, lng: from.lng },
                 to: { stopId: toStopId, name: to.name, lat: to.lat, lng: to.lng },
                 distanceMeters: via.distanceMeters,
+                durationSeconds: via.walkingTime,
                 geometry: via.geometry,
             });
             i++;
@@ -173,15 +178,48 @@ function summarize(segments: any[]) {
 }
 
 /**
+ * Collapses journey segments into a brief outline — e.g. "Walk 5 min", "K5B", "Walk 3
+ * min" — merging adjacent walk/transfer segments (both are walking to the rider) so a
+ * boarding-stop transfer right after the initial walk doesn't show as two walk steps.
+ */
+function stepsFromSegments(segments: any[]): JourneyStep[] {
+    const steps: JourneyStep[] = [];
+    for (const seg of segments) {
+        if (seg.type === "bus") {
+            steps.push({
+                type: "ride",
+                routeRef: seg.routeRef ?? seg.routeId,
+                routeName: seg.routeName,
+                durationMinutes: Math.round((seg.durationSeconds ?? 0) / 60),
+            });
+            continue;
+        }
+
+        const durationMinutes = Math.round((seg.durationSeconds ?? 0) / 60);
+        const last = steps[steps.length - 1];
+        if (last?.type === "walk") {
+            last.durationMinutes += durationMinutes;
+        } else {
+            steps.push({ type: "walk", durationMinutes });
+        }
+    }
+    return steps;
+}
+
+/**
  * Finds a journey from origin to destination using walking and public transport.
  *
  * Query:
  * - `origin`: "lat,lng"
  * - `destination`: "lat,lng"
  *
- * Returns `{ lessWalking, lessTransit }`, each holding journey segments for walking,
- * bus rides, and transfers plus a summary — or `null` if no route exists under that
- * profile. See path-cost.ts for what the two profiles optimise for.
+ * Returns `{ alternativesAvailable, best, lessWalking?, lessTransit? }`. `best` is
+ * always present — the lessWalking result, or the lessTransit one if lessWalking found
+ * no route. `lessWalking`/`lessTransit` are only included when the two profiles land
+ * on genuinely different journeys (`alternativesAvailable: true`); otherwise they're
+ * omitted since `best` already represents both. See path-cost.ts for what the two
+ * profiles optimise for. Each journey includes a brief `steps` outline (e.g. "Walk 5
+ * min", "K5B", "Walk 3 min") alongside the full `segments`.
  */
 export async function GET(request: NextRequest) {
     const params = request.nextUrl.searchParams;
@@ -214,10 +252,12 @@ export async function GET(request: NextRequest) {
 
     // Two profiles can land on the exact same physical path (common when only one
     // sensible route exists) — cache by the path's stop sequence so we don't hit Apple
-    // Maps twice for identical walking legs.
-    const journeyCache = new Map<string, Promise<{ segments: any[]; summary: ReturnType<typeof summarize> } | null>>();
+    // Maps twice for identical walking legs, and so the outer comparison below can tell
+    // the two profiles apart cheaply.
+    type BuiltJourney = { segments: any[]; summary: ReturnType<typeof summarize>; steps: JourneyStep[] };
+    const journeyCache = new Map<string, Promise<BuiltJourney | null>>();
 
-    async function buildJourneyForProfile(weights: CostWeights) {
+    async function buildJourneyForProfile(weights: CostWeights): Promise<{ signature: string; journey: BuiltJourney } | null> {
         // Search every (boarding, alighting) candidate pair and keep whichever minimizes
         // the weighted cost (walk-to-stop + transit + walk-from-stop, all priced the same
         // way as the profile prices the rest of the trip). Ranking by distance instead
@@ -254,10 +294,13 @@ export async function GET(request: NextRequest) {
         if (preferDirectWalk) {
             const walk = await walkSegment(env, { ...origin!, name: "Origin" }, { ...destination!, name: "Destination" });
             if (!walk) return null;
-            return { segments: [walk], summary: summarize([walk]) };
+            const journey = { segments: [walk], summary: summarize([walk]), steps: stepsFromSegments([walk]) };
+            // All direct-walk results for a given origin/destination are the same trip,
+            // regardless of profile — give them a shared, constant signature.
+            return { signature: "walk", journey };
         }
 
-        const signature = best!.path.map((step) => step.stopId).join(">");
+        const signature = pathSignature(best!.path);
         if (!journeyCache.has(signature)) {
             journeyCache.set(
                 signature,
@@ -286,26 +329,33 @@ export async function GET(request: NextRequest) {
                     if (!finalWalk) return null;
 
                     const segments = [initialWalk, ...transitLegs, finalWalk];
-                    return { segments, summary: summarize(segments) };
+                    return { segments, summary: summarize(segments), steps: stepsFromSegments(segments) };
                 })()
             );
         }
-        return journeyCache.get(signature)!;
+        const journey = await journeyCache.get(signature)!;
+        return journey ? { signature, journey } : null;
     }
 
-    const entries = await Promise.all(
-        (Object.entries(ROUTE_PROFILES) as [RouteProfileKey, CostWeights][]).map(
-            async ([key, weights]) => [key, await buildJourneyForProfile(weights)] as const
-        )
-    );
+    const [lessWalking, lessTransit] = await Promise.all([
+        buildJourneyForProfile(ROUTE_PROFILES.lessWalking),
+        buildJourneyForProfile(ROUTE_PROFILES.lessTransit),
+    ]);
 
-    const results: Record<string, unknown> = {};
-    for (const [key, journey] of entries) {
-        results[key] = journey ? { origin, destination, ...journey } : null;
-    }
-
-    if (!results.lessWalking && !results.lessTransit) {
+    if (!lessWalking && !lessTransit) {
         return NextResponse.json({ error: "No route found" }, { status: 404 });
+    }
+
+    const alternativesAvailable = !!lessWalking && !!lessTransit && lessWalking.signature !== lessTransit.signature;
+    const toResponseJourney = (j: { journey: BuiltJourney }) => ({ origin, destination, ...j.journey });
+
+    const results: Record<string, unknown> = {
+        alternativesAvailable,
+        best: toResponseJourney((lessWalking ?? lessTransit)!),
+    };
+    if (alternativesAvailable) {
+        results.lessWalking = toResponseJourney(lessWalking!);
+        results.lessTransit = toResponseJourney(lessTransit!);
     }
 
     return NextResponse.json(results);
