@@ -1,9 +1,10 @@
 // OpenAPI document describing the public HTTP API. Served as JSON at
 // /api/openapi.json and rendered by Scalar at /reference.
 //
-// Only documents /api/astar, /api/journey/overview, /api/maps/route, the Quest-tagged
-// paths, and the Journey-tagged /api/private/journey* paths for now — add other paths
-// here as they get documented.
+// Only documents /api/astar, /api/journey/overview, /api/maps/route, /api/maps/search,
+// /api/maps/search/resolve, /api/maps/geocode, the Quest-tagged paths, and the
+// Journey-tagged /api/private/journey* paths for now — add other paths here as they
+// get documented.
 
 const journeyStepSchema = {
     description:
@@ -71,6 +72,14 @@ export const openApiSpec = {
                 "attached badges into an ordered list of JourneyStep rows the user works through. All endpoints " +
                 "under this tag require `Authorization: Bearer <session-token>` (see DEVELOPMENT.md for how to " +
                 "mint a debug session locally) and are scoped to the caller's own attempts.",
+        },
+        {
+            name: "Location",
+            description:
+                "Place search and geocoding for Bali. `GET /maps/search` gives as-you-type suggestions from " +
+                "Apple Maps; `GET /maps/search/resolve` turns one of those suggestions into coordinates when it " +
+                "didn't already carry them; `GET /maps/geocode` resolves a full address or place name entered " +
+                "in one go, falling back to OpenStreetMap when Apple's Indonesia coverage comes up empty.",
         },
     ],
     components: {
@@ -460,6 +469,33 @@ export const openApiSpec = {
                     calorie: { type: "number" },
                     startPoint: { type: "string" },
                     finishPoint: { type: "string" },
+                },
+            },
+            PlaceSuggestion: {
+                type: "object",
+                required: ["label", "sublabel", "lat", "lng"],
+                properties: {
+                    label: { type: "string" },
+                    sublabel: { type: ["string", "null"] },
+                    lat: { type: "number" },
+                    lng: { type: "number" },
+                },
+            },
+            AutocompleteSuggestion: {
+                type: "object",
+                required: ["label", "sublabel", "lat", "lng", "resolveToken"],
+                properties: {
+                    label: { type: "string" },
+                    sublabel: { type: ["string", "null"] },
+                    lat: {
+                        oneOf: [{ type: "number" }, { type: "null" }],
+                        description: "Null when Apple hasn't pinned this completion to one place yet — see resolveToken.",
+                    },
+                    lng: { oneOf: [{ type: "number" }, { type: "null" }] },
+                    resolveToken: {
+                        oneOf: [{ type: "string" }, { type: "null" }],
+                        description: "Pass to GET /maps/search/resolve to get coordinates. Set only when lat/lng are null.",
+                    },
                 },
             },
         },
@@ -1485,5 +1521,173 @@ export const openApiSpec = {
         //         },
         //     },
         // },
+        "/maps/search": {
+            get: {
+                tags: ["Location"],
+                summary: "Search-as-you-type place/address suggestions for Bali",
+                description:
+                    "Backed by Apple Maps' autocomplete, biased to Bali. Cheap enough to call on every " +
+                    "keystroke (debounce client-side regardless). Most results already come back with " +
+                    "`lat`/`lng` ready to use; a few generic completions Apple hasn't pinned to one place " +
+                    "yet omit them and carry a `resolveToken` instead — pass that to GET /maps/search/resolve " +
+                    "once the user actually picks that suggestion, so most keystrokes still cost just this " +
+                    "one lightweight call.\n\n" +
+                    "For a full address/place name entered in one go rather than as-you-type, see " +
+                    "GET /maps/geocode instead — it also falls back to OpenStreetMap for addresses Apple's " +
+                    "Indonesia coverage misses.",
+                parameters: [
+                    {
+                        name: "q",
+                        in: "query",
+                        required: true,
+                        description: "Partial search text.",
+                        schema: { type: "string" },
+                        example: "sanur",
+                    },
+                ],
+                responses: {
+                    "200": {
+                        description: "Suggestions found (possibly empty).",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["results"],
+                                    properties: {
+                                        results: { type: "array", items: { $ref: "#/components/schemas/AutocompleteSuggestion" } },
+                                    },
+                                },
+                                example: {
+                                    results: [
+                                        {
+                                            label: "Sanur",
+                                            sublabel: "Denpasar, Bali, Indonesia",
+                                            lat: -8.682278633117676,
+                                            lng: 115.25910949707031,
+                                            resolveToken: null,
+                                        },
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Missing `q`.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Invalid arguments" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/maps/search/resolve": {
+            get: {
+                tags: ["Location"],
+                summary: "Resolve a search suggestion's resolveToken into coordinates",
+                description:
+                    "Only needed for the minority of GET /maps/search suggestions that come back without " +
+                    "`lat`/`lng` — call this once, when the user actually picks one of those, not on every " +
+                    "keystroke.",
+                parameters: [
+                    {
+                        name: "token",
+                        in: "query",
+                        required: true,
+                        description: "The `resolveToken` value from a /maps/search result.",
+                        schema: { type: "string" },
+                    },
+                ],
+                responses: {
+                    "200": {
+                        description: "Resolved place(s).",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["results"],
+                                    properties: {
+                                        results: { type: "array", items: { $ref: "#/components/schemas/PlaceSuggestion" } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Missing or malformed `token`.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Invalid arguments" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/maps/geocode": {
+            get: {
+                tags: ["Location"],
+                summary: "Resolve a full address or place name to coordinates",
+                description:
+                    "Not as-you-type — see GET /maps/search for that. Tries Apple Maps first; since Apple's " +
+                    "address coverage in Indonesia is patchy, falls back to OpenStreetMap (Nominatim, which " +
+                    "tends to have denser community-mapped coverage here) only when Apple comes back with " +
+                    "nothing, so the OSM call is never made speculatively.",
+                parameters: [
+                    {
+                        name: "q",
+                        in: "query",
+                        required: true,
+                        description: "The address or place text to resolve.",
+                        schema: { type: "string" },
+                        example: "Jalan Sunset Road Kuta",
+                    },
+                ],
+                responses: {
+                    "200": {
+                        description: "Place(s) found (possibly empty), and which provider produced them.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["results", "source"],
+                                    properties: {
+                                        results: { type: "array", items: { $ref: "#/components/schemas/PlaceSuggestion" } },
+                                        source: {
+                                            type: "string",
+                                            enum: ["apple", "osm"],
+                                            description: "Which provider actually produced `results`.",
+                                        },
+                                    },
+                                },
+                                example: {
+                                    results: [
+                                        {
+                                            label: "Jalan Sunset Road",
+                                            sublabel: "Jalan Sunset Road, Kabupaten Badung, Bali, Indonesia",
+                                            lat: -8.698646030799532,
+                                            lng: 115.17756587690396,
+                                        },
+                                    ],
+                                    source: "apple",
+                                },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Missing `q`.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Invalid arguments" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
     },
 } as const
