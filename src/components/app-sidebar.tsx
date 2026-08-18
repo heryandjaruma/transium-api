@@ -33,15 +33,6 @@ export function AppSidebar() {
                                 render={<Link href="/map">Map</Link>}
                             />
                         </SidebarMenuItem>
-                        <SidebarMenuItem>
-                            <SidebarMenuButton>Routes Stops Mapping</SidebarMenuButton>
-                        </SidebarMenuItem>
-                        <SidebarMenuItem>
-                            <SidebarMenuButton>Bus Stops</SidebarMenuButton>
-                        </SidebarMenuItem>
-                        <SidebarMenuItem>
-                            <SidebarMenuButton>Bus Routes</SidebarMenuButton>
-                        </SidebarMenuItem>
                     </SidebarMenu>
                 </SidebarGroup>
                 <SidebarGroup>
