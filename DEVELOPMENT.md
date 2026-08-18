@@ -51,3 +51,13 @@ Then do request for the private endpoint with the debug session like above.
 ```
 Header: Authorization: Bearer debug-token-123
 ```
+
+### Journey endpoints
+
+| Method | Path                      | Purpose                                                                 |
+| ------ | -------------------------- | ------------------------------------------------------------------------ |
+| POST   | `/api/private/journey/go`  | Start a journey attempt for a quest. Body: `{ questId }`.                |
+| GET    | `/api/private/journey`     | List the caller's journey attempts. Query: `status?`.                    |
+| GET    | `/api/private/journey/{id}`| Get a single journey attempt, its steps, and its summary (if ended).     |
+
+Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Journey" tag.

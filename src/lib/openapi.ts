@@ -1,8 +1,9 @@
 // OpenAPI document describing the public HTTP API. Served as JSON at
 // /api/openapi.json and rendered by Scalar at /reference.
 //
-// Only documents /api/astar, /api/journey/overview, /api/maps/route, and the Quest-tagged
-// paths for now — add other paths here as they get documented.
+// Only documents /api/astar, /api/journey/overview, /api/maps/route, the Quest-tagged
+// paths, and the Journey-tagged /api/private/journey* paths for now — add other paths
+// here as they get documented.
 
 const journeyStepSchema = {
     description:
@@ -62,8 +63,26 @@ export const openApiSpec = {
                 "that one of its badges is scoped to (Badge.kelurahanId), and its origin/destination coordinates " +
                 "for route preview come from its badges' step locations.",
         },
+        {
+            name: "Journey",
+            description:
+                "Endpoints for a signed-in user progressing through a quest. Starting a quest (`POST " +
+                "/private/journey/go`) creates a JourneyAttempt and flattens every BadgeAction across the quest's " +
+                "attached badges into an ordered list of JourneyStep rows the user works through. All endpoints " +
+                "under this tag require `Authorization: Bearer <session-token>` (see DEVELOPMENT.md for how to " +
+                "mint a debug session locally) and are scoped to the caller's own attempts.",
+        },
     ],
     components: {
+        securitySchemes: {
+            bearerAuth: {
+                type: "http",
+                scheme: "bearer",
+                description:
+                    "A Better Auth session token, obtained via /api/auth/* or (for local debugging) inserted " +
+                    "directly into the `session` table — see DEVELOPMENT.md.",
+            },
+        },
         schemas: {
             JourneyStep: journeyStepSchema,
             JourneyStopRef: {
@@ -396,6 +415,53 @@ export const openApiSpec = {
                     kecamatanName: { type: "string" },
                 },
             },
+            JourneyAttempt: {
+                type: "object",
+                required: [
+                    "id", "userQuestId", "questId", "questName", "questCategory",
+                    "currentStepSequence", "status", "createdAt", "startedAt", "endedAt",
+                ],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    userQuestId: { type: "string", format: "uuid" },
+                    questId: { type: "string", format: "uuid" },
+                    questName: { type: "string" },
+                    questCategory: { type: "string" },
+                    currentStepSequence: { type: "integer", description: "0 until the user completes their first step." },
+                    status: { type: "string", description: "e.g. \"started\"." },
+                    createdAt: { type: "string", format: "date-time" },
+                    startedAt: { oneOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
+                    endedAt: { oneOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
+                },
+            },
+            JourneyAttemptStep: {
+                type: "object",
+                required: ["id", "journeyAttemptId", "sequence", "name", "description", "type", "lat", "lng", "status"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    journeyAttemptId: { type: "string", format: "uuid" },
+                    sequence: { type: "integer", description: "1-based, ordered across all of the quest's badges." },
+                    name: { type: "string", description: "The step's ActionDefinition.name." },
+                    description: { type: "string", description: "The BadgeAction's instruction, or ActionDefinition.description if unset." },
+                    type: { type: "string", description: "The step's ActionDefinition.type, e.g. \"required\"/\"optional\"." },
+                    lat: { oneOf: [{ type: "number" }, { type: "null" }] },
+                    lng: { oneOf: [{ type: "number" }, { type: "null" }] },
+                    status: { type: "string", enum: ["waiting", "done"] },
+                },
+            },
+            JourneySummary: {
+                type: "object",
+                required: ["id", "journeyAttemptId", "stepsTaken", "distanceMeters", "calorie", "startPoint", "finishPoint"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    journeyAttemptId: { type: "string", format: "uuid" },
+                    stepsTaken: { type: "integer" },
+                    distanceMeters: { type: "number" },
+                    calorie: { type: "number" },
+                    startPoint: { type: "string" },
+                    finishPoint: { type: "string" },
+                },
+            },
         },
     },
     paths: {
@@ -596,6 +662,177 @@ export const openApiSpec = {
                                     noWalkToStop: { value: { error: "No walking route to boarding stop" } },
                                     noWalkFromStop: { value: { error: "No walking route from alighting stop" } },
                                 },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/journey/go": {
+            post: {
+                tags: ["Journey"],
+                summary: "Start a journey attempt for a quest",
+                description:
+                    "Creates a JourneyAttempt (`status: \"started\"`, `currentStepSequence: 0`) for the caller, " +
+                    "finding or creating their UserQuest for `questId` first. Flattens every BadgeAction across " +
+                    "the quest's attached badges (in badge-attachment then step-sequence order — the same " +
+                    "grouping GET /quest/{id} returns) into a JourneyStep per action, each initialised " +
+                    "`status: \"waiting\"`. Fails with 409 if the caller already has a JourneyAttempt with " +
+                    "`status: \"started\"` for this quest.",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["questId"],
+                                properties: { questId: { type: "string", format: "uuid" } },
+                            },
+                            example: { questId: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f" },
+                        },
+                    },
+                },
+                responses: {
+                    "201": {
+                        description: "Journey started.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["journeyAttempt", "steps"],
+                                    properties: {
+                                        journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" },
+                                        steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Missing/invalid `questId`, or the quest has no steps to complete.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                examples: {
+                                    invalid: { value: { error: "Invalid questId" } },
+                                    noSteps: { value: { error: "This quest has no steps to complete" } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No quest with this id.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Quest not found" },
+                            },
+                        },
+                    },
+                    "409": {
+                        description: "The caller already has a journey in progress for this quest.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "A journey is already in progress for this quest" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/journey": {
+            get: {
+                tags: ["Journey"],
+                summary: "List the caller's journey attempts",
+                description: "Returns the caller's own JourneyAttempts, most recent first, as a summary list (no steps — see GET /private/journey/{id} for those).",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        name: "status",
+                        in: "query",
+                        required: false,
+                        description: "Filter to attempts with this JourneyAttempt.status.",
+                        schema: { type: "string" },
+                        example: "started",
+                    },
+                ],
+                responses: {
+                    "200": {
+                        description: "The caller's journey attempts.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["journeyAttempts"],
+                                    properties: { journeyAttempts: { type: "array", items: { $ref: "#/components/schemas/JourneyAttempt" } } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/journey/{id}": {
+            get: {
+                tags: ["Journey"],
+                summary: "Get a single journey attempt",
+                description:
+                    "Returns one of the caller's own JourneyAttempts with its ordered JourneySteps and its " +
+                    "JourneySummary (`null` until the journey has ended).",
+                security: [{ bearerAuth: [] }],
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+                responses: {
+                    "200": {
+                        description: "Journey attempt found.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["journeyAttempt", "steps", "summary"],
+                                    properties: {
+                                        journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" },
+                                        steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
+                                        summary: { oneOf: [{ $ref: "#/components/schemas/JourneySummary" }, { type: "null" }] },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No journey attempt with this id belonging to the caller.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Journey not found" },
                             },
                         },
                     },
