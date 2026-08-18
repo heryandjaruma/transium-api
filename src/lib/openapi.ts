@@ -74,6 +74,14 @@ export const openApiSpec = {
                 "mint a debug session locally) and are scoped to the caller's own attempts.",
         },
         {
+            name: "Profile",
+            description:
+                "Endpoints for a signed-in user's own Profile (firstName/lastName/level) and avatar (`user.image`). " +
+                "A Profile row is created lazily on first GET/PATCH, since nothing else creates one on signup. All " +
+                "endpoints under this tag require `Authorization: Bearer <session-token>` and are scoped to the " +
+                "caller's own data.",
+        },
+        {
             name: "Location",
             description:
                 "Place search and geocoding for Bali. `GET /maps/search` gives as-you-type suggestions from " +
@@ -469,6 +477,17 @@ export const openApiSpec = {
                     calorie: { type: "number" },
                     startPoint: { type: "string" },
                     finishPoint: { type: "string" },
+                },
+            },
+            Profile: {
+                type: "object",
+                required: ["id", "userId", "firstName", "lastName", "level"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    userId: { type: "string" },
+                    firstName: { type: "string" },
+                    lastName: { type: ["string", "null"] },
+                    level: { type: "integer", description: "Not user-editable via PATCH /private/profile/{id}." },
                 },
             },
             PlaceSuggestion: {
@@ -937,6 +956,200 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 example: { error: "Journey step not found" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/profile/{id}": {
+            get: {
+                tags: ["Profile"],
+                summary: "Get the caller's profile",
+                description:
+                    "Returns the caller's own Profile, creating one on first access (`firstName`/`lastName` " +
+                    "default from the Better Auth user's `name`, `level` defaults to 1). `id` must be the " +
+                    "caller's own user id.",
+                security: [{ bearerAuth: [] }],
+                parameters: [{ name: "id", in: "path", required: true, description: "The caller's own user id.", schema: { type: "string" } }],
+                responses: {
+                    "200": {
+                        description: "Profile found (or just created).",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", required: ["profile"], properties: { profile: { $ref: "#/components/schemas/Profile" } } },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "403": {
+                        description: "`id` does not match the caller's own user id.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Forbidden" },
+                            },
+                        },
+                    },
+                },
+            },
+            patch: {
+                tags: ["Profile"],
+                summary: "Update the caller's profile",
+                description:
+                    "Updates `firstName`/`lastName` on the caller's own Profile, creating one first if it " +
+                    "doesn't exist yet. `level` is not user-editable. `id` must be the caller's own user id.",
+                security: [{ bearerAuth: [] }],
+                parameters: [{ name: "id", in: "path", required: true, description: "The caller's own user id.", schema: { type: "string" } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                description: "Any of the properties may be omitted to leave that field unchanged.",
+                                properties: {
+                                    firstName: { type: "string" },
+                                    lastName: { type: ["string", "null"], description: "Pass null to clear it." },
+                                },
+                            },
+                            example: { firstName: "Ada", lastName: "Lovelace" },
+                        },
+                    },
+                },
+                responses: {
+                    "200": {
+                        description: "Profile updated.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", required: ["profile"], properties: { profile: { $ref: "#/components/schemas/Profile" } } },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Invalid body, invalid `firstName`/`lastName`, or no fields to update.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                examples: {
+                                    invalidBody: { value: { error: "Invalid arguments" } },
+                                    invalidFirstName: { value: { error: "Invalid firstName" } },
+                                    invalidLastName: { value: { error: "Invalid lastName" } },
+                                    noFields: { value: { error: "No fields to update" } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "403": {
+                        description: "`id` does not match the caller's own user id.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Forbidden" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/profile/media": {
+            post: {
+                tags: ["Profile"],
+                summary: "Upload the caller's avatar",
+                description:
+                    "Uploads an image to R2 (under `media/user/<userId>/avatar/`) and sets it as the caller's " +
+                    "`user.image`, deleting the previously uploaded avatar (if any) once the new one is stored. " +
+                    "An avatar inherited from an OAuth provider (e.g. Sign in with Apple) is left alone rather " +
+                    "than deleted.",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "multipart/form-data": {
+                            schema: {
+                                type: "object",
+                                required: ["file"],
+                                properties: {
+                                    file: { type: "string", format: "binary", description: "image/png, image/jpeg, image/webp, or image/gif, up to 8 MB." },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    "201": {
+                        description: "Avatar uploaded.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", required: ["image"], properties: { image: { type: "string" } } },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Missing/unsupported/oversized `file`.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                examples: {
+                                    missingFile: { value: { error: "Missing file" } },
+                                    unsupportedType: { value: { error: "Unsupported file type" } },
+                                    tooLarge: { value: { error: "File too large" } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                },
+            },
+            delete: {
+                tags: ["Profile"],
+                summary: "Remove the caller's avatar",
+                description:
+                    "Clears the caller's `user.image`, deleting the R2 object too if it was previously uploaded " +
+                    "through this endpoint (an OAuth-provided avatar URL is left alone).",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "204": { description: "Avatar removed." },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "The caller has no image set.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Profile has no image" },
                             },
                         },
                     },
