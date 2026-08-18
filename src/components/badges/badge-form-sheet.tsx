@@ -106,7 +106,7 @@ export function BadgeFormSheet({ open, onOpenChange, badge, onSaved }: Props) {
                         />
                     </div>
                     <div className="flex flex-col gap-1.5">
-                        <Label htmlFor="badge-category">Category</Label>
+                        <Label htmlFor="badge-category">Category (any category you want)</Label>
                         <Input
                             id="badge-category"
                             value={form.category}
@@ -115,7 +115,7 @@ export function BadgeFormSheet({ open, onOpenChange, badge, onSaved }: Props) {
                         />
                     </div>
                     <div className="flex flex-col gap-1.5">
-                        <Label htmlFor="badge-type">Type</Label>
+                        <Label htmlFor="badge-type">Type (<span className="mono">`quest` or `once`</span>)</Label>
                         <Input
                             id="badge-type"
                             value={form.type}
