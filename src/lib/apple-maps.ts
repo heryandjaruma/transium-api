@@ -58,6 +58,19 @@ async function getMapsAccessToken(env: CloudflareEnv): Promise<string> {
   return accessToken;
 }
 
+async function mapsFetch<T>(env: CloudflareEnv, path: string): Promise<T> {
+  const token = await getMapsAccessToken(env);
+  const res = await fetch(`${APPLE_MAPS_BASE_URL}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Apple Maps request failed: ${res.status} ${await res.text()}`);
+  }
+
+  return res.json();
+}
+
 export type TransportType = "Automobile" | "Walking" | "Cycling";
 
 interface AppleLocation {
@@ -100,21 +113,83 @@ export async function getDirections(
   destination: { lat: number; lng: number },
   transportType: TransportType = "Automobile"
 ): Promise<DirectionsResponse> {
-  const token = await getMapsAccessToken(env);
-
   const params = new URLSearchParams({
     origin: `${origin.lat},${origin.lng}`,
     destination: `${destination.lat},${destination.lng}`,
     transportType,
   });
 
-  const res = await fetch(`${APPLE_MAPS_BASE_URL}/v1/directions?${params}`, {
-    headers: { Authorization: `Bearer ${token}` },
+  return mapsFetch(env, `/v1/directions?${params}`);
+}
+
+// --- Search / autocomplete / geocode -------------------------------------------------
+//
+// Only the fields this codebase actually reads are typed below; Apple's responses carry
+// more (e.g. structuredAddress, poiCategory) that we don't currently use.
+
+/** A geographic bias applied to search/geocode requests. */
+export interface SearchBias {
+  /**
+   * "north,east,south,west" — results outside this region are deprioritized, not
+   * excluded. Apple's API rejects a request that sets both this and a location bias, so
+   * this is the only bias knob exposed.
+   */
+  searchRegion: string;
+}
+
+export interface ApplePlaceResult {
+  name?: string;
+  formattedAddressLines?: string[];
+  coordinate?: { latitude: number; longitude: number };
+}
+
+export interface AppleSearchResponse {
+  results?: ApplePlaceResult[];
+}
+
+export interface AppleAutocompleteResult {
+  /**
+   * Relative path (e.g. "/v1/search?q=...&metadata=...") to resolve this completion
+   * into full place details via /v1/search. Present when `location` isn't — mainly for
+   * generic query refinements that don't resolve to one specific place yet.
+   */
+  completionUrl?: string;
+  /** Display text for the completion, e.g. `["Eiffel Tower", "Paris, France"]`. */
+  displayLines?: string[];
+  location?: { latitude: number; longitude: number };
+}
+
+export interface AppleAutocompleteResponse {
+  results?: AppleAutocompleteResult[];
+}
+
+function searchParams(query: string, bias: SearchBias): URLSearchParams {
+  return new URLSearchParams({
+    q: query,
+    searchRegion: bias.searchRegion,
+    limitToCountries: "ID",
   });
+}
 
-  if (!res.ok) {
-    throw new Error(`Apple Maps directions request failed: ${res.status} ${await res.text()}`);
-  }
+/** Search-as-you-type completions via Apple's `/v1/searchAutocomplete`. */
+export async function searchAutocomplete(
+  env: CloudflareEnv,
+  query: string,
+  bias: SearchBias
+): Promise<AppleAutocompleteResponse> {
+  return mapsFetch(env, `/v1/searchAutocomplete?${searchParams(query, bias)}`);
+}
 
-  return res.json();
+/**
+ * Resolves a searchAutocomplete result's `completionUrl` into full place details. The
+ * URL is Apple's own relative path (already includes `q` and an opaque `metadata`
+ * token) — pass it through unchanged.
+ */
+export async function resolveCompletion(env: CloudflareEnv, completionUrl: string): Promise<AppleSearchResponse> {
+  return mapsFetch(env, completionUrl);
+}
+
+/** Resolves a free-text address/place to coordinates via Apple's `/v1/geocode`. */
+export async function geocode(env: CloudflareEnv, query: string, bias: SearchBias): Promise<AppleSearchResponse> {
+  return mapsFetch(env, `/v1/geocode?${searchParams(query, bias)}`);
 }
