@@ -1,9 +1,11 @@
 // Shared helpers for media uploaded to the "transium" R2 bucket under
-// "media/system/...". The public URL mirrors the R2 key 1:1 (served by
+// "media/system/..." (app-authored content) and "media/user/..." (user
+// uploads). The public URL mirrors the R2 key 1:1 (served by
 // src/app/media/[...key]/route.ts).
 
 export const QUEST_MEDIA_PREFIX = "media/system/quest"
 export const BADGE_MEDIA_PREFIX = "media/system/badge"
+export const USER_JOURNEY_MEDIA_PREFIX = "media/user"
 
 export function questMediaKey(questId: string, filename: string) {
     return `${QUEST_MEDIA_PREFIX}/${questId}/${filename}`
@@ -11,6 +13,10 @@ export function questMediaKey(questId: string, filename: string) {
 
 export function badgeMediaKey(badgeId: string, filename: string) {
     return `${BADGE_MEDIA_PREFIX}/${badgeId}/${filename}`
+}
+
+export function journeyMediaKey(userId: string, journeyAttemptId: string, filename: string) {
+    return `${USER_JOURNEY_MEDIA_PREFIX}/${userId}/journey/${journeyAttemptId}/${filename}`
 }
 
 export function mediaUrlForKey(key: string) {
