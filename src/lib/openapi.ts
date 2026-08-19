@@ -119,6 +119,14 @@ export const openApiSpec = {
                 "didn't already carry them; `GET /maps/geocode` resolves a full address or place name entered " +
                 "in one go, falling back to OpenStreetMap when Apple's Indonesia coverage comes up empty.",
         },
+        {
+            name: "Account",
+            description:
+                "`DELETE /private/account` permanently deletes the caller's account and everything tied to it — " +
+                "journey attempts (steps, summary, walked path, photos), bookmarks/quest progress, earned " +
+                "badges, profile, avatar, and the Better Auth identity itself (user, sessions, linked social " +
+                "accounts). Nothing is retained to smooth over a future re-signup; this cannot be undone.",
+        },
     ],
     components: {
         securitySchemes: {
@@ -1986,6 +1994,31 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 example: { error: "APNs is not configured" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/account": {
+            delete: {
+                tags: ["Account"],
+                summary: "Permanently delete the caller's account and all associated data",
+                description:
+                    "Deletes journey attempts (steps, summary, walked path, photos), bookmarks/quest progress, " +
+                    "earned badges, profile, avatar, and the Better Auth identity itself (user, sessions, linked " +
+                    "social accounts). All R2 objects under the caller's `media/user/<userId>/` prefix are " +
+                    "removed too. This cannot be undone, and there is no confirmation step beyond calling the " +
+                    "endpoint — callers should confirm intent in the client before sending the request.",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "204": { description: "Account and all associated data deleted." },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
                             },
                         },
                     },
