@@ -74,6 +74,15 @@ export const openApiSpec = {
                 "mint a debug session locally) and are scoped to the caller's own attempts.",
         },
         {
+            name: "Bookmark",
+            description:
+                "Endpoints for a signed-in user to save quests for later. `POST /private/bookmark` creates a " +
+                "UserQuest row with `status: \"bookmarked\"` — the same row `POST /private/journey/go` finds-or" +
+                "-creates when a journey starts, so a bookmarked quest's status moves on from there once the " +
+                "user actually starts it. All endpoints under this tag require `Authorization: Bearer " +
+                "<session-token>` and are scoped to the caller's own data.",
+        },
+        {
             name: "Profile",
             description:
                 "Endpoints for a signed-in user's own Profile (firstName/lastName/level) and avatar (`user.image`). " +
@@ -488,6 +497,17 @@ export const openApiSpec = {
                     calorie: { type: "number" },
                     startPoint: { type: "string" },
                     finishPoint: { type: "string" },
+                },
+            },
+            Bookmark: {
+                type: "object",
+                required: ["id", "questId", "questName", "questCategory", "createdAt"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    questId: { type: "string", format: "uuid" },
+                    questName: { type: "string" },
+                    questCategory: { type: "string" },
+                    createdAt: { type: "string", format: "date-time" },
                 },
             },
             Profile: {
@@ -982,6 +1002,165 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 example: { error: "Journey step not found" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/bookmark": {
+            get: {
+                tags: ["Bookmark"],
+                summary: "List the caller's bookmarked quests",
+                description: "Returns the caller's own Bookmark entries, most recent first.",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "The caller's bookmarked quests.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["bookmarks"],
+                                    properties: { bookmarks: { type: "array", items: { $ref: "#/components/schemas/Bookmark" } } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                },
+            },
+            post: {
+                tags: ["Bookmark"],
+                summary: "Bookmark a quest",
+                description:
+                    "Creates a UserQuest for the caller with `status: \"bookmarked\"`. Fails with 409 if the " +
+                    "caller already has a UserQuest for this quest, whether bookmarked or already in progress.",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["questId"],
+                                properties: { questId: { type: "string", format: "uuid" } },
+                            },
+                            example: { questId: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f" },
+                        },
+                    },
+                },
+                responses: {
+                    "201": {
+                        description: "Quest bookmarked.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", required: ["bookmark"], properties: { bookmark: { $ref: "#/components/schemas/Bookmark" } } },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Missing or invalid `questId`.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Invalid questId" },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No quest with this id.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Quest not found" },
+                            },
+                        },
+                    },
+                    "409": {
+                        description: "The caller already has a UserQuest for this quest.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Quest already saved" },
+                            },
+                        },
+                    },
+                },
+            },
+            delete: {
+                tags: ["Bookmark"],
+                summary: "Remove a bookmarked quest",
+                description:
+                    "Un-bookmarks a quest by deleting the caller's UserQuest row. Body: `{ questId }`. Fails " +
+                    "with 409 if the quest has any JourneyAttempt recorded against it, since those reference " +
+                    "this row.",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["questId"],
+                                properties: { questId: { type: "string", format: "uuid" } },
+                            },
+                            example: { questId: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f" },
+                        },
+                    },
+                },
+                responses: {
+                    "204": { description: "Bookmark removed." },
+                    "400": {
+                        description: "Missing or invalid `questId`.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Invalid questId" },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No bookmark for this quest belonging to the caller.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Bookmark not found" },
+                            },
+                        },
+                    },
+                    "409": {
+                        description: "The quest has journey attempts recorded against it.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Cannot remove a quest that has journey attempts" },
                             },
                         },
                     },
