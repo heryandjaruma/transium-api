@@ -1,10 +1,10 @@
 // OpenAPI document describing the public HTTP API. Served as JSON at
 // /api/openapi.json and rendered by Scalar at /reference.
 //
-// Only documents /api/astar, /api/journey/overview, /api/journey/real, /api/maps/route,
-// /api/maps/search, /api/maps/search/resolve, /api/maps/geocode, the Quest-tagged paths,
-// and the Journey-tagged /api/private/journey* paths for now — add other paths here as
-// they get documented.
+// Only documents /api/astar, the Trip-tagged /api/journey/overview and /api/journey/real,
+// /api/maps/route, /api/maps/search, /api/maps/search/resolve, /api/maps/geocode, the
+// Quest-tagged paths, and the Journey-tagged /api/private/journey* paths for now — add
+// other paths here as they get documented.
 
 const journeyStepSchema = {
     description:
@@ -63,6 +63,16 @@ export const openApiSpec = {
                 "one or more badges. A quest has no location of its own — it's reachable through any kelurahan " +
                 "that one of its badges is scoped to (Badge.kelurahanId), and its origin/destination coordinates " +
                 "for route preview come from its badges' step locations.",
+        },
+        {
+            name: "Trip",
+            description:
+                "Door-to-door routing between real coordinates, combining walking directions (via Apple Maps) " +
+                "with transit routing over the bus graph. `GET /journey/overview` plans between two arbitrary " +
+                "points; `GET /journey/real` plans from the caller's own position onto a quest's fixed route. " +
+                "Both search under two cost profiles (less walking vs. fewer transfers) and share the same " +
+                "response envelope — see either endpoint's description for the `alternativesAvailable`/`best`/ " +
+                "`lessWalking`/`lessTransit` shape.",
         },
         {
             name: "Journey",
@@ -728,6 +738,7 @@ export const openApiSpec = {
         // },
         "/journey/overview": {
             get: {
+                tags: ["Trip"],
                 summary: "Plan a door-to-door journey between two coordinates, less-walking and less-transit alike",
                 description:
                     "Finds a journey from an arbitrary origin to an arbitrary destination coordinate, combining " +
@@ -814,6 +825,7 @@ export const openApiSpec = {
         },
         "/journey/real": {
             get: {
+                tags: ["Trip"],
                 summary: "Build the real, walkable journey for a quest from wherever the caller is",
                 description:
                     "Builds the quest's actual route, starting from the caller's own position rather than the " +
