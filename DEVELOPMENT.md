@@ -86,3 +86,11 @@ Registers APNs device tokens so a user can be pushed to on more than one device.
 | POST   | `/api/private/device/test` | Send a test push to all of the caller's registered devices.            |
 
 Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Device" tag.
+
+### Account endpoints
+
+| Method | Path                   | Purpose                                                                          |
+| ------ | ---------------------- | --------------------------------------------------------------------------------- |
+| DELETE | `/api/private/account` | Permanently delete the caller's account and all associated data. Irreversible.  |
+
+Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Account" tag.
