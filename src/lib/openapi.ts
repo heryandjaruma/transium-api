@@ -92,9 +92,10 @@ export const openApiSpec = {
                 "/private/journey/go`) creates a JourneyAttempt and flattens every BadgeAction across the quest's " +
                 "attached badges into an ordered list of JourneyStep rows the user works through. Completing it " +
                 "(`POST /private/journey/{id}/complete`, once every step is `status: \"done\"`) awards the quest's " +
-                "`xp` to the caller's Profile.level. All endpoints under this tag require `Authorization: Bearer " +
-                "<session-token>` (see DEVELOPMENT.md for how to mint a debug session locally) and are scoped to " +
-                "the caller's own attempts.",
+                "`xp` to the caller's Profile.level and a UserBadge for every Badge attached to the quest the " +
+                "caller doesn't already have (see the Badge tag). All endpoints under this tag require " +
+                "`Authorization: Bearer <session-token>` (see DEVELOPMENT.md for how to mint a debug session " +
+                "locally) and are scoped to the caller's own attempts.",
         },
         {
             name: "Bookmark",
@@ -104,6 +105,15 @@ export const openApiSpec = {
                 "-creates when a journey starts, so a bookmarked quest's status moves on from there once the " +
                 "user actually starts it. All endpoints under this tag require `Authorization: Bearer " +
                 "<session-token>` and are scoped to the caller's own data.",
+        },
+        {
+            name: "Badge",
+            description:
+                "Endpoints for a signed-in user's own earned badges. A UserBadge row is created automatically " +
+                "by `POST /private/journey/{id}/complete` for every Badge attached (via QuestBadge) to the quest " +
+                "whose journey the caller just finished — there's no endpoint to earn one directly. All " +
+                "endpoints under this tag require `Authorization: Bearer <session-token>` and are scoped to the " +
+                "caller's own data.",
         },
         {
             name: "Profile",
@@ -452,6 +462,25 @@ export const openApiSpec = {
                     badgeCategory: { type: "string" },
                     badgeType: { type: "string" },
                     badgeImageUrl: { type: ["string", "null"] },
+                },
+            },
+            EarnedBadge: {
+                description:
+                    "A badge the caller has earned (a UserBadge row joined with its Badge). Awarded automatically " +
+                    "by POST /private/journey/{id}/complete for every Badge attached (via QuestBadge) to a " +
+                    "quest whose journey the caller just finished, skipping any they already have.",
+                type: "object",
+                required: ["id", "badgeId", "badgeName", "badgeCategory", "badgeType", "badgeImageUrl", "earnedAt", "questId", "questName"],
+                properties: {
+                    id: { type: "string", format: "uuid", description: "The UserBadge row's own id." },
+                    badgeId: { type: "string", format: "uuid" },
+                    badgeName: { type: "string" },
+                    badgeCategory: { type: "string" },
+                    badgeType: { type: "string" },
+                    badgeImageUrl: { type: ["string", "null"] },
+                    earnedAt: { type: "string", format: "date-time" },
+                    questId: { oneOf: [{ type: "string", format: "uuid" }, { type: "null" }], description: "The quest whose journey earned this badge." },
+                    questName: { type: ["string", "null"] },
                 },
             },
             BadgeActionStep: {
@@ -1448,11 +1477,13 @@ export const openApiSpec = {
                     "or any other completion path), guarding against finishing early. Marks the " +
                     "JourneyAttempt `status: \"completed\"` with `endedAt`, the parent UserQuest " +
                     "`status: \"completed\"`, writes the JourneySummary and JourneyPathPoints from the request " +
-                    "body, and awards the quest's `xp` to the caller's Profile.level (creating the Profile first " +
-                    "if this is their first journey).\n\n" +
-                    "Idempotent no-op (200, returning the existing summary/path unchanged, `xpAwarded: 0`) if the " +
-                    "attempt is already `status: \"completed\"` — xp is only awarded once, on the call that " +
-                    "actually transitions the attempt. The body isn't parsed on the no-op path.",
+                    "body, awards the quest's `xp` to the caller's Profile.level (creating the Profile first if " +
+                    "this is their first journey), and creates a UserBadge for every Badge attached to the quest " +
+                    "(via QuestBadge) the caller doesn't already have.\n\n" +
+                    "Idempotent no-op (200, returning the existing summary/path unchanged, `xpAwarded: 0`, " +
+                    "`badgesAwarded: []`) if the attempt is already `status: \"completed\"` — xp/badges are only " +
+                    "awarded once, on the call that actually transitions the attempt. The body isn't parsed on " +
+                    "the no-op path.",
                 security: [{ bearerAuth: [] }],
                 parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
                 requestBody: {
@@ -1499,12 +1530,12 @@ export const openApiSpec = {
                 },
                 responses: {
                     "200": {
-                        description: "Journey attempt completed (or already was — left unchanged, `xpAwarded: 0`).",
+                        description: "Journey attempt completed (or already was — left unchanged, `xpAwarded: 0`, `badgesAwarded: []`).",
                         content: {
                             "application/json": {
                                 schema: {
                                     type: "object",
-                                    required: ["journeyAttempt", "steps", "summary", "path", "xpAwarded", "profile"],
+                                    required: ["journeyAttempt", "steps", "summary", "path", "xpAwarded", "badgesAwarded", "profile"],
                                     properties: {
                                         journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" },
                                         steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
@@ -1513,6 +1544,11 @@ export const openApiSpec = {
                                         xpAwarded: {
                                             type: "integer",
                                             description: "The quest's `xp`, just added to `profile.level`. `0` on the idempotent no-op path.",
+                                        },
+                                        badgesAwarded: {
+                                            type: "array",
+                                            description: "Newly-created UserBadges from this call. Empty if the quest has no badges, the caller already had them all, or on the idempotent no-op path.",
+                                            items: { $ref: "#/components/schemas/EarnedBadge" },
                                         },
                                         profile: { $ref: "#/components/schemas/Profile" },
                                     },
@@ -1732,6 +1768,40 @@ export const openApiSpec = {
                                     type: "object",
                                     required: ["quests"],
                                     properties: { quests: { type: "array", items: { $ref: "#/components/schemas/QuestWithUserStatus" } } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/badge": {
+            get: {
+                tags: ["Badge"],
+                summary: "List the caller's earned badges",
+                description:
+                    "Returns the badges the caller has earned, most recently earned first. `questId`/`questName` " +
+                    "are the quest whose journey completion earned the badge (both `null` in the rare case the " +
+                    "underlying JourneyAttempt reference is missing).",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "The caller's earned badges.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["badges"],
+                                    properties: { badges: { type: "array", items: { $ref: "#/components/schemas/EarnedBadge" } } },
                                 },
                             },
                         },
