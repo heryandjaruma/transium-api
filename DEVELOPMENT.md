@@ -32,9 +32,38 @@ npx wrangler d1 execute transium --local --command "SELECT * FROM BusStop LIMIT 
 npx wrangler d1 execute transium --remote --command "SELECT * FROM BusStop LIMIT 20"
 ```
 
+## Sign In / Sign Out
+
+Sign-in and sign-out are handled by Better Auth's own catch-all handler (`/api/auth/*`), not a custom Transium route — see `src/app/api/auth/[...all]/route.ts` and `src/lib/auth.ts`.
+
+| Method | Path                       | Purpose                                                                 |
+| ------ | --------------------------- | -------------------------------------------------------------------------- |
+| POST   | `/api/auth/sign-in/social`  | Exchange an Apple identity token for a Transium session.               |
+| POST   | `/api/auth/sign-out`        | Delete the caller's session, invalidating its bearer token.            |
+
+**Sign in** — the iOS app runs the native `ASAuthorizationController` Sign in with Apple flow, then POSTs the resulting identity token:
+
+```json
+POST /api/auth/sign-in/social
+{ "provider": "apple", "idToken": { "token": "<identityToken JWT>", "user": { "name": { "firstName": "...", "lastName": "..." } } } }
+```
+
+`idToken.user` is only ever sent by Apple on the **first** authorization for a given Apple ID + app — omit it on later sign-ins (including after account deletion + re-signup, which resets that state). The response's `token` field (also mirrored in the `set-auth-token` response header) is the value to send as `Authorization: Bearer <token>` on every other endpoint.
+
+**Sign out**:
+
+```
+POST /api/auth/sign-out
+Authorization: Bearer <session-token>
+```
+
+Deletes that one session; other signed-in devices are untouched. Call `DELETE /private/device` first if that device should also stop receiving pushes.
+
+Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Auth" tag.
+
 ## Hit Private Endpoints
 
-Run this to create a dummy session.
+For local testing without going through a real Apple sign-in, run this to create a dummy session.
 
 ```shell
 npx wrangler d1 execute transium --local --command "
