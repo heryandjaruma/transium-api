@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 type Params = { params: Promise<{ id: string }> };
 type KelurahanRow = { id: string; kelurahanName: string; kecamatanName: string };
-type QuestRow = { id: string; name: string; category: string; description: string; xp: number };
+type QuestRow = { id: string; name: string; category: string; description: string; xp: number; label: string | null };
 type MediaRow = { id: string; createdAt: string; type: string; url: string };
 type QuestBadgeRow = {
     id: string;
@@ -31,7 +31,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
     const questsRes = await env.DB
         .prepare(
-            `SELECT DISTINCT q.id as id, q.name as name, q.category as category, q.description as description, q.xp as xp
+            `SELECT DISTINCT q.id as id, q.name as name, q.category as category, q.description as description, q.xp as xp, q.label as label
              FROM Quest q
              JOIN QuestBadge qb ON qb.questId = q.id
              JOIN Badge b ON b.id = qb.badgeId

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getAuth } from "@/lib/auth";
+import { getOrCreateProfile, SELECT_PROFILE, ProfileRow } from "@/lib/profile";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -16,6 +17,8 @@ type JourneyAttemptRow = {
     startedAt: string | null;
     endedAt: string | null;
 };
+
+type JourneyAttemptWithXpRow = JourneyAttemptRow & { questXp: number };
 
 type JourneyStepRow = {
     id: string;
@@ -111,11 +114,15 @@ function parseCompleteBody(body: unknown) {
  * for the walked route, stored separately from the summary.
  *
  * Marks the JourneyAttempt `status: "completed"` with `endedAt`, the parent UserQuest
- * `status: "completed"`, and writes JourneySummary + JourneyPathPoint rows.
+ * `status: "completed"`, writes JourneySummary + JourneyPathPoint rows, and awards the
+ * quest's `xp` to the caller's Profile.level (creating the Profile first if this is
+ * their first journey).
  *
- * Idempotent no-op (200, returning the existing summary/path unchanged) if the attempt
- * is already `status: "completed"`. Fails with 400 if any step is still `"waiting"` (the
- * body isn't even parsed in that case), or 409 if the attempt isn't active.
+ * Idempotent no-op (200, returning the existing summary/path unchanged, `xpAwarded: 0`)
+ * if the attempt is already `status: "completed"` — xp is only ever awarded once, on
+ * the call that actually transitions the attempt. Fails with 400 if any step is still
+ * `"waiting"` (the body isn't even parsed in that case), or 409 if the attempt isn't
+ * active.
  */
 export async function POST(request: NextRequest, { params }: Params) {
     const { id } = await params;
@@ -126,7 +133,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const journeyAttempt = await env.DB
         .prepare(
-            `SELECT ja.id, ja.userQuestId, uq.questId, q.name as questName, q.category as questCategory,
+            `SELECT ja.id, ja.userQuestId, uq.questId, q.name as questName, q.category as questCategory, q.xp as questXp,
                     ja.currentStepSequence, ja.status, ja.createdAt, ja.startedAt, ja.endedAt
              FROM JourneyAttempt ja
              JOIN UserQuest uq ON uq.id = ja.userQuestId
@@ -134,7 +141,7 @@ export async function POST(request: NextRequest, { params }: Params) {
              WHERE ja.id = ? AND uq.userId = ?`
         )
         .bind(id, session.user.id)
-        .first<JourneyAttemptRow>();
+        .first<JourneyAttemptWithXpRow>();
     if (!journeyAttempt) return NextResponse.json({ error: "Journey not found" }, { status: 404 });
 
     const stepsRes = await env.DB
@@ -153,7 +160,16 @@ export async function POST(request: NextRequest, { params }: Params) {
             .prepare(`SELECT id, journeyAttemptId, sequence, lat, lng, recordedAt FROM JourneyPathPoint WHERE journeyAttemptId = ? ORDER BY sequence`)
             .bind(id)
             .all<JourneyPathPointRow>();
-        return NextResponse.json({ journeyAttempt, steps, summary: summary ?? null, path: pathRes.results });
+        const existingProfile = await env.DB.prepare(SELECT_PROFILE).bind(session.user.id).first<ProfileRow>();
+        const { questXp: _questXp, ...alreadyCompletedAttempt } = journeyAttempt;
+        return NextResponse.json({
+            journeyAttempt: alreadyCompletedAttempt,
+            steps,
+            summary: summary ?? null,
+            path: pathRes.results,
+            xpAwarded: 0,
+            profile: existingProfile ?? null,
+        });
     }
     if (journeyAttempt.status !== "started") {
         return NextResponse.json({ error: "Journey is not active" }, { status: 409 });
@@ -194,6 +210,8 @@ export async function POST(request: NextRequest, { params }: Params) {
         recordedAt: point.recordedAt,
     }));
 
+    await getOrCreateProfile(env.DB, session.user.id, session.user.name);
+
     await env.DB.batch([
         env.DB
             .prepare(`UPDATE JourneyAttempt SET status = 'completed', endedAt = ?, currentStepSequence = ? WHERE id = ?`)
@@ -212,7 +230,11 @@ export async function POST(request: NextRequest, { params }: Params) {
                 .prepare(`INSERT INTO JourneyPathPoint (id, journeyAttemptId, sequence, lat, lng, recordedAt) VALUES (?, ?, ?, ?, ?, ?)`)
                 .bind(point.id, point.journeyAttemptId, point.sequence, point.lat, point.lng, point.recordedAt)
         ),
+        env.DB.prepare(`UPDATE Profile SET level = level + ? WHERE userId = ?`).bind(journeyAttempt.questXp, session.user.id),
     ]);
 
-    return NextResponse.json({ journeyAttempt, steps, summary, path });
+    const { questXp, ...completedAttempt } = journeyAttempt;
+    const profile = await env.DB.prepare(SELECT_PROFILE).bind(session.user.id).first<ProfileRow>();
+
+    return NextResponse.json({ journeyAttempt: completedAttempt, steps, summary, path, xpAwarded: questXp, profile });
 }

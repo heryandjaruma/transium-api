@@ -11,5 +11,6 @@ export type Quest = {
     category: string
     description: string
     xp: number
+    label: string | null
     thumbnails: QuestMedia[]
 }

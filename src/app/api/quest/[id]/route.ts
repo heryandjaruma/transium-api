@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { pruneOrphanedMedia } from "@/lib/media-storage";
 
 type Params = { params: Promise<{ id: string }> };
-type QuestRow = { id: string; name: string; category: string; description: string; xp: number };
+type QuestRow = { id: string; name: string; category: string; description: string; xp: number; label: string | null };
 type MediaRow = { id: string; createdAt: string; type: string; url: string };
 type QuestBadgeRow = { id: string; badgeId: string; badgeName: string; badgeCategory: string; badgeType: string; badgeImageUrl: string | null };
 type StepRow = {
@@ -22,7 +22,7 @@ type LatLng = { lat: number; lng: number };
 const UPDATABLE_STRING_FIELDS = ["name", "category", "description"] as const;
 
 async function getQuestWithThumbnails(db: D1Database, id: string) {
-    const quest = await db.prepare(`SELECT id, name, category, description, xp FROM Quest WHERE id = ?`).bind(id).first<QuestRow>();
+    const quest = await db.prepare(`SELECT id, name, category, description, xp, label FROM Quest WHERE id = ?`).bind(id).first<QuestRow>();
     if (!quest) return null;
 
     const media = await db
@@ -107,7 +107,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ quest });
 }
 
-/** Updates a quest. Body may include any of `{ name, category, description, xp }`. */
+/** Updates a quest. Body may include any of `{ name, category, description, xp, label }`. `label` accepts a non-empty string or `null` to clear it. */
 export async function PATCH(request: NextRequest, { params }: Params) {
     const { id } = await params;
     const body = await request.json().catch(() => null);
@@ -117,7 +117,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const bodyRecord = body as Record<string, unknown>;
 
     const fields: string[] = [];
-    const values: (string | number)[] = [];
+    const values: (string | number | null)[] = [];
     for (const key of UPDATABLE_STRING_FIELDS) {
         const value = bodyRecord[key];
         if (value === undefined) continue;
@@ -134,6 +134,14 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         }
         fields.push("xp = ?");
         values.push(xp as number);
+    }
+    if ("label" in bodyRecord) {
+        const label = bodyRecord.label;
+        if (label !== null && (typeof label !== "string" || !label.trim())) {
+            return NextResponse.json({ error: "Invalid arguments" }, { status: 400 });
+        }
+        fields.push("label = ?");
+        values.push(typeof label === "string" ? label.trim() : null);
     }
 
     if (fields.length === 0) {
