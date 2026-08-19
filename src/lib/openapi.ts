@@ -479,17 +479,41 @@ export const openApiSpec = {
             },
             JourneyAttemptStep: {
                 type: "object",
-                required: ["id", "journeyAttemptId", "sequence", "name", "description", "type", "lat", "lng", "status"],
+                required: ["id", "journeyAttemptId", "sequence", "name", "description", "type", "lat", "lng", "radiusMeters", "status"],
                 properties: {
                     id: { type: "string", format: "uuid" },
                     journeyAttemptId: { type: "string", format: "uuid" },
                     sequence: { type: "integer", description: "1-based, ordered across all of the quest's badges." },
-                    name: { type: "string", description: "The step's ActionDefinition.name." },
+                    name: {
+                        type: "string",
+                        description:
+                            "The step's ActionDefinition.name, or the literal `\"takePicture\"` for an artificial " +
+                            "photo checkpoint (see POST /private/journey/go).",
+                    },
                     description: { type: "string", description: "The BadgeAction's instruction, or ActionDefinition.description if unset." },
                     type: { type: "string", enum: ["required", "optional"], description: "The step's BadgeAction.type." },
                     lat: { oneOf: [{ type: "number" }, { type: "null" }] },
                     lng: { oneOf: [{ type: "number" }, { type: "null" }] },
+                    radiusMeters: {
+                        oneOf: [{ type: "number" }, { type: "null" }],
+                        description:
+                            "Geofence tolerance for lat/lng, in meters — null when lat/lng is null. The same value " +
+                            "POST .../advance checks the submitted position against, so a client's " +
+                            "CLCircularRegion radius should match it exactly.",
+                    },
                     status: { type: "string", enum: ["waiting", "done"] },
+                },
+            },
+            JourneyGeofence: {
+                type: "object",
+                description: "A location a client should register a CLCircularRegion (or equivalent) for.",
+                required: ["stepId", "sequence", "lat", "lng", "radiusMeters"],
+                properties: {
+                    stepId: { type: "string", format: "uuid", description: "The JourneyAttemptStep this geofence belongs to." },
+                    sequence: { type: "integer" },
+                    lat: { type: "number" },
+                    lng: { type: "number" },
+                    radiusMeters: { type: "number", description: "Matches the same step's radiusMeters, and what POST .../advance checks against." },
                 },
             },
             JourneySummary: {
@@ -797,8 +821,18 @@ export const openApiSpec = {
                     "finding or creating their UserQuest for `questId` first. Flattens every BadgeAction across " +
                     "the quest's attached badges (in badge-attachment then step-sequence order — the same " +
                     "grouping GET /quest/{id} returns) into a JourneyStep per action, each initialised " +
-                    "`status: \"waiting\"`. Fails with 409 if the caller already has a JourneyAttempt with " +
-                    "`status: \"started\"` for *any* quest — only one journey can be in progress at a time.",
+                    "`status: \"waiting\"`.\n\n" +
+                    "1-3 artificial `type: \"optional\"` steps (`name: \"takePicture\"`) are interleaved in — " +
+                    "one always lands on the route's first located waypoint (before the quest's own first " +
+                    "action), with up to two more spaced out by walked distance on longer routes — so the " +
+                    "user is prompted to document their journey even when none of the quest's own actions do. " +
+                    "None are added within ~600m of an existing \"take picture\"-like action.\n\n" +
+                    "`geofences` is every located step (real or artificial) as a `{ stepId, sequence, lat, lng, " +
+                    "radiusMeters }` the client should register a CLCircularRegion for — `radiusMeters` is the " +
+                    "same tolerance POST .../advance itself checks the submitted position against, so a " +
+                    "client-side region radius and the server's acceptance distance never disagree.\n\n" +
+                    "Fails with 409 if the caller already has a JourneyAttempt with `status: \"started\"` for " +
+                    "*any* quest — only one journey can be in progress at a time.",
                 security: [{ bearerAuth: [] }],
                 requestBody: {
                     required: true,
@@ -820,10 +854,11 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: {
                                     type: "object",
-                                    required: ["journeyAttempt", "steps"],
+                                    required: ["journeyAttempt", "steps", "geofences"],
                                     properties: {
                                         journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" },
                                         steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
+                                        geofences: { type: "array", items: { $ref: "#/components/schemas/JourneyGeofence" } },
                                     },
                                 },
                             },

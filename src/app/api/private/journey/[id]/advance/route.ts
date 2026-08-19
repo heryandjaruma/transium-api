@@ -5,9 +5,10 @@ import { haversine } from "@/lib/bus-graph";
 
 type Params = { params: Promise<{ id: string }> };
 
-// Generous margin over typical urban GPS drift (5-50m near tall buildings/transit
-// corridors) so a legitimate arrival isn't rejected, while still catching a spoofed one.
-const GEOFENCE_TOLERANCE_METERS = 150;
+// Fallback for JourneyStep rows created before radiusMeters existed (pre-migration 0011).
+// Otherwise every step carries its own radius, set at creation by POST .../go, so the
+// client's CLCircularRegion and this check always agree on what counts as "arrived".
+const DEFAULT_GEOFENCE_TOLERANCE_METERS = 150;
 
 type JourneyAttemptRow = {
     id: string;
@@ -31,6 +32,7 @@ type JourneyStepRow = {
     type: string;
     lat: number | null;
     lng: number | null;
+    radiusMeters: number | null;
     status: string;
 };
 
@@ -80,7 +82,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (!journeyAttempt) return NextResponse.json({ error: "Journey not found" }, { status: 404 });
 
     const stepsRes = await env.DB
-        .prepare(`SELECT id, journeyAttemptId, sequence, name, description, type, lat, lng, status FROM JourneyStep WHERE journeyAttemptId = ? ORDER BY sequence`)
+        .prepare(`SELECT id, journeyAttemptId, sequence, name, description, type, lat, lng, radiusMeters, status FROM JourneyStep WHERE journeyAttemptId = ? ORDER BY sequence`)
         .bind(id)
         .all<JourneyStepRow>();
     const steps = stepsRes.results;
@@ -103,7 +105,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     const distance = haversine({ lat: target.lat, lng: target.lng }, { lat, lng });
-    if (distance > GEOFENCE_TOLERANCE_METERS) {
+    const tolerance = target.radiusMeters ?? DEFAULT_GEOFENCE_TOLERANCE_METERS;
+    if (distance > tolerance) {
         return NextResponse.json({ error: "Too far from this step's location" }, { status: 400 });
     }
 

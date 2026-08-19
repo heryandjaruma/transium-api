@@ -26,6 +26,7 @@ type JourneyStepRow = {
     type: string;
     lat: number | null;
     lng: number | null;
+    radiusMeters: number | null;
     status: string;
 };
 
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (!journeyAttempt) return NextResponse.json({ error: "Journey not found" }, { status: 404 });
 
     const stepsRes = await env.DB
-        .prepare(`SELECT id, journeyAttemptId, sequence, name, description, type, lat, lng, status FROM JourneyStep WHERE journeyAttemptId = ? ORDER BY sequence`)
+        .prepare(`SELECT id, journeyAttemptId, sequence, name, description, type, lat, lng, radiusMeters, status FROM JourneyStep WHERE journeyAttemptId = ? ORDER BY sequence`)
         .bind(id)
         .all<JourneyStepRow>();
 
