@@ -103,6 +103,15 @@ Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.
 
 Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Profile" tag.
 
+### Gallery endpoints
+
+| Method | Path                          | Purpose                                                                        |
+| ------ | ------------------------------ | --------------------------------------------------------------------------------- |
+| GET    | `/api/private/gallery`         | List every photo across all of the caller's journey steps, most recent first. |
+| GET    | `/api/private/gallery/{id}`    | Download a single photo (`id` is the Media id) as an attachment.              |
+
+Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Gallery" tag.
+
 ### Device endpoints
 
 Registers APNs device tokens so a user can be pushed to on more than one device. Common flow: `POST` right after sign-in (and again on token rotation), `DELETE` on sign-out.

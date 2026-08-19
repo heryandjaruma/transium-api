@@ -110,6 +110,14 @@ export const openApiSpec = {
                 "caller's own data.",
         },
         {
+            name: "Gallery",
+            description:
+                "The caller's photo gallery — every photo uploaded via `POST /private/journey/media`, across " +
+                "every journey step and journey attempt they've ever had, in one flat list. `GET /private/gallery` " +
+                "lists them; `GET /private/gallery/{id}` downloads one. All endpoints under this tag require " +
+                "`Authorization: Bearer <session-token>` and are scoped to the caller's own photos.",
+        },
+        {
             name: "Device",
             description:
                 "Registers the caller's APNs device tokens so pushes can reach every device they're signed in " +
@@ -378,6 +386,24 @@ export const openApiSpec = {
                     type: { type: "string", description: "MIME type, e.g. \"image/jpeg\"." },
                     url: { type: "string" },
                 },
+            },
+            GalleryItem: {
+                description: "A photo the caller uploaded to a journey step, with enough context to group/label it in a gallery view.",
+                allOf: [
+                    { $ref: "#/components/schemas/MediaAsset" },
+                    {
+                        type: "object",
+                        required: ["journeyStepId", "journeyStepName", "journeyStepSequence", "journeyAttemptId", "questId", "questName"],
+                        properties: {
+                            journeyStepId: { type: "string", format: "uuid" },
+                            journeyStepName: { type: "string" },
+                            journeyStepSequence: { type: "integer" },
+                            journeyAttemptId: { type: "string", format: "uuid" },
+                            questId: { type: "string", format: "uuid" },
+                            questName: { type: "string" },
+                        },
+                    },
+                ],
             },
             Quest: {
                 type: "object",
@@ -1571,6 +1597,76 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 example: { error: "Journey step not found" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/gallery": {
+            get: {
+                tags: ["Gallery"],
+                summary: "List every photo across the caller's journey steps",
+                description:
+                    "Returns every photo the caller has uploaded to any journey step, across every journey " +
+                    "attempt, most recent first. Each entry carries the quest and journey step it came from " +
+                    "so a client can group/label them without extra lookups.",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "The caller's gallery.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["media"],
+                                    properties: { media: { type: "array", items: { $ref: "#/components/schemas/GalleryItem" } } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/gallery/{id}": {
+            get: {
+                tags: ["Gallery"],
+                summary: "Download a photo from the caller's gallery",
+                description:
+                    "Streams the photo's raw bytes back with `Content-Disposition: attachment`, so it saves as " +
+                    "a file rather than rendering inline. `id` is the Media id (from `GET /private/gallery`) " +
+                    "and must belong to one of the caller's own journey steps.",
+                security: [{ bearerAuth: [] }],
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+                responses: {
+                    "200": {
+                        description: "The photo's raw bytes.",
+                        content: { "image/*": { schema: { type: "string", format: "binary" } } },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No photo with this id belonging to the caller.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Photo not found" },
                             },
                         },
                     },
