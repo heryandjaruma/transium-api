@@ -792,7 +792,7 @@ export const openApiSpec = {
                     "the quest's attached badges (in badge-attachment then step-sequence order — the same " +
                     "grouping GET /quest/{id} returns) into a JourneyStep per action, each initialised " +
                     "`status: \"waiting\"`. Fails with 409 if the caller already has a JourneyAttempt with " +
-                    "`status: \"started\"` for this quest.",
+                    "`status: \"started\"` for *any* quest — only one journey can be in progress at a time.",
                 security: [{ bearerAuth: [] }],
                 requestBody: {
                     required: true,
@@ -854,11 +854,24 @@ export const openApiSpec = {
                         },
                     },
                     "409": {
-                        description: "The caller already has a journey in progress for this quest.",
+                        description: "The caller already has a journey in progress, for this quest or another one.",
                         content: {
                             "application/json": {
-                                schema: { type: "object", properties: { error: { type: "string" } } },
-                                example: { error: "A journey is already in progress for this quest" },
+                                schema: {
+                                    type: "object",
+                                    properties: { error: { type: "string" }, activeJourneyAttemptId: { type: "string", format: "uuid" } },
+                                },
+                                examples: {
+                                    sameQuest: {
+                                        value: { error: "A journey is already in progress for this quest", activeJourneyAttemptId: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f" },
+                                    },
+                                    otherQuest: {
+                                        value: {
+                                            error: "You already have a journey in progress for \"Kelurahan Sukamaju Explorer\" — finish that one before starting a new one",
+                                            activeJourneyAttemptId: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f",
+                                        },
+                                    },
+                                },
                             },
                         },
                     },

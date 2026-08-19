@@ -74,6 +74,10 @@ async function getQuestOverviewSteps(db: D1Database, questId: string): Promise<O
  * the quest's overview (across all attached badges, in attachment/sequence order), each
  * carrying its action's name/description/type and lat/lng when the BadgeAction has one,
  * initialised as `status: "waiting"`.
+ *
+ * Fails with 409 if the caller already has a JourneyAttempt with `status: "started"` for
+ * *any* quest — only one journey can be in progress at a time — including
+ * `activeJourneyAttemptId` in the response so the client can route straight to it.
  */
 export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => null);
@@ -97,6 +101,26 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "This quest has no steps to complete" }, { status: 400 });
     }
 
+    // A user can only have one journey going at a time, across every quest — not just
+    // this one — so they don't end up mid-walk on two different routes at once.
+    const activeAttempt = await env.DB
+        .prepare(
+            `SELECT ja.id, uq.questId, q.name as questName
+             FROM JourneyAttempt ja
+             JOIN UserQuest uq ON uq.id = ja.userQuestId
+             JOIN Quest q ON q.id = uq.questId
+             WHERE uq.userId = ? AND ja.status = 'started'`
+        )
+        .bind(userId)
+        .first<{ id: string; questId: string; questName: string }>();
+    if (activeAttempt) {
+        const error =
+            activeAttempt.questId === questId
+                ? "A journey is already in progress for this quest"
+                : `You already have a journey in progress for "${activeAttempt.questName}" — finish that one before starting a new one`;
+        return NextResponse.json({ error, activeJourneyAttemptId: activeAttempt.id }, { status: 409 });
+    }
+
     const now = new Date().toISOString();
 
     let userQuest = await env.DB
@@ -111,14 +135,6 @@ export async function POST(request: NextRequest) {
             .bind(userQuestId, userId, questId, "in_progress", now)
             .run();
         userQuest = { id: userQuestId };
-    }
-
-    const activeAttempt = await env.DB
-        .prepare(`SELECT id FROM JourneyAttempt WHERE userQuestId = ? AND status = 'started'`)
-        .bind(userQuest.id)
-        .first();
-    if (activeAttempt) {
-        return NextResponse.json({ error: "A journey is already in progress for this quest" }, { status: 409 });
     }
 
     const journeyAttempt: JourneyAttemptRow = {
