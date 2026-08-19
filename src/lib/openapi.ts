@@ -57,6 +57,15 @@ export const openApiSpec = {
     servers: [{ url: "/api" }],
     tags: [
         {
+            name: "Auth",
+            description:
+                "Sign-in and sign-out, both handled by Better Auth's own catch-all handler at `/api/auth/*` " +
+                "(not custom Transium routes) — only the two the iOS app actually calls are documented here. " +
+                "The app signs in with the native `ASAuthorizationController` Apple flow, then trades the " +
+                "resulting identity token for a Transium session via `POST /auth/sign-in/social`. All other " +
+                "endpoints in this spec then authenticate with `Authorization: Bearer <session-token>`.",
+        },
+        {
             name: "Quest",
             description:
                 "Quests are the discoverable activities shown to end users, each carrying thumbnail media and " +
@@ -627,6 +636,127 @@ export const openApiSpec = {
         },
     },
     paths: {
+        "/auth/sign-in/social": {
+            post: {
+                tags: ["Auth"],
+                summary: "Sign in with Apple (native identity token exchange)",
+                description:
+                    "Exchanges a Sign in with Apple identity token for a Transium session. The iOS app runs the " +
+                    "native `ASAuthorizationController` flow, then POSTs the resulting `identityToken` here as " +
+                    "`idToken.token`.\n\n" +
+                    "Apple includes `idToken.user` (name/email) only on the **first ever** authorization for a " +
+                    "given Apple ID + app — every sign-in after that omits it, even after a full account " +
+                    "deletion and re-signup. Send it when present; the server stores what it gets and doesn't " +
+                    "ask Apple to resend it. `email` alone is less critical to capture since it also arrives on " +
+                    "every sign-in via a claim inside the identity token itself, read directly by the server — " +
+                    "only `name` is truly one-shot.\n\n" +
+                    "On success the session token comes back both as `token` in the JSON body and as a " +
+                    "`set-auth-token` response header; either is a valid `Authorization: Bearer <token>` value " +
+                    "for every other endpoint in this spec. This creates a new `user` row on first sign-in for a " +
+                    "given Apple ID, or resumes the existing one otherwise.",
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["provider", "idToken"],
+                                properties: {
+                                    provider: { type: "string", enum: ["apple"] },
+                                    idToken: {
+                                        type: "object",
+                                        required: ["token"],
+                                        properties: {
+                                            token: { type: "string", description: "The `identityToken` (JWT) from `ASAuthorizationAppleIDCredential`." },
+                                            user: {
+                                                type: "object",
+                                                description: "Only send this on the first authorization for the Apple ID — Apple only provides it then.",
+                                                properties: {
+                                                    name: {
+                                                        type: "object",
+                                                        properties: {
+                                                            firstName: { type: "string" },
+                                                            lastName: { type: "string" },
+                                                        },
+                                                    },
+                                                    email: { type: "string" },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            example: {
+                                provider: "apple",
+                                idToken: {
+                                    token: "eyJraWQiOiJ...",
+                                    user: { name: { firstName: "Jordan", lastName: "Lee" } },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    "200": {
+                        description: "Signed in. `token` is the session token to use as `Authorization: Bearer <token>`.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["redirect", "token", "user"],
+                                    properties: {
+                                        redirect: { type: "boolean", enum: [false] },
+                                        token: { type: "string" },
+                                        user: {
+                                            type: "object",
+                                            properties: {
+                                                id: { type: "string" },
+                                                name: { type: "string" },
+                                                email: { type: "string" },
+                                                image: { type: ["string", "null"] },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "The identity token is missing, expired, or fails Apple signature verification.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/auth/sign-out": {
+            post: {
+                tags: ["Auth"],
+                summary: "Sign out the caller",
+                description:
+                    "Deletes the caller's session server-side, immediately invalidating the bearer token used " +
+                    "on this request. Only ends the one session the token belongs to — other devices signed " +
+                    "into the same account are unaffected. Always returns success, even if the token was " +
+                    "already invalid, so it's safe to call unconditionally on logout.\n\n" +
+                    "Pair this with `DELETE /private/device` beforehand (with that device's token) if the " +
+                    "device should also stop receiving pushes.",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "Signed out (or already was).",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { success: { type: "boolean" } } },
+                                example: { success: true },
+                            },
+                        },
+                    },
+                },
+            },
+        },
         // "/astar": {
         //     get: {
         //         summary: "Find a route between two stops, less-walking and less-transit alike",
