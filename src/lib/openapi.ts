@@ -499,6 +499,19 @@ export const openApiSpec = {
                     finishPoint: { type: "string" },
                 },
             },
+            JourneyPathPoint: {
+                description: "One GPS sample from the device's recorded breadcrumb for a journey attempt, in walked order.",
+                type: "object",
+                required: ["id", "journeyAttemptId", "sequence", "lat", "lng", "recordedAt"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    journeyAttemptId: { type: "string", format: "uuid" },
+                    sequence: { type: "integer", description: "1-based, in walked order." },
+                    lat: { type: "number" },
+                    lng: { type: "number" },
+                    recordedAt: { oneOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
+                },
+            },
             Bookmark: {
                 type: "object",
                 required: ["id", "questId", "questName", "questCategory", "createdAt"],
@@ -898,8 +911,9 @@ export const openApiSpec = {
                 tags: ["Journey"],
                 summary: "Get a single journey attempt",
                 description:
-                    "Returns one of the caller's own JourneyAttempts with its ordered JourneySteps and its " +
-                    "JourneySummary (`null` until the journey has ended).",
+                    "Returns one of the caller's own JourneyAttempts with its ordered JourneySteps, its " +
+                    "JourneySummary (`null` until the journey has ended), and its walked JourneyPathPoints " +
+                    "(empty until the journey has ended).",
                 security: [{ bearerAuth: [] }],
                 parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
                 responses: {
@@ -909,11 +923,12 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: {
                                     type: "object",
-                                    required: ["journeyAttempt", "steps", "summary"],
+                                    required: ["journeyAttempt", "steps", "summary", "path"],
                                     properties: {
                                         journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" },
                                         steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
                                         summary: { oneOf: [{ $ref: "#/components/schemas/JourneySummary" }, { type: "null" }] },
+                                        path: { type: "array", items: { $ref: "#/components/schemas/JourneyPathPoint" } },
                                     },
                                 },
                             },
@@ -1025,6 +1040,131 @@ export const openApiSpec = {
                                     noAttempt: { value: { error: "Journey not found" } },
                                     noStep: { value: { error: "Journey step not found" } },
                                 },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/journey/{id}/complete": {
+            post: {
+                tags: ["Journey"],
+                summary: "Explicitly complete a journey attempt",
+                description:
+                    "Unlike POST .../advance, this endpoint never marks steps done itself — it only " +
+                    "finalizes an attempt whose JourneySteps are already all `status: \"done\"` (via advance, " +
+                    "or any other completion path), guarding against finishing early. Marks the " +
+                    "JourneyAttempt `status: \"completed\"` with `endedAt`, the parent UserQuest " +
+                    "`status: \"completed\"`, and writes the JourneySummary and JourneyPathPoints from the " +
+                    "request body.\n\n" +
+                    "Idempotent no-op (200, returning the existing summary/path unchanged) if the attempt is " +
+                    "already `status: \"completed\"` — the body isn't parsed in that case.",
+                security: [{ bearerAuth: [] }],
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["stepsTaken", "distanceMeters", "calorie", "startPoint", "finishPoint", "path"],
+                                properties: {
+                                    stepsTaken: { type: "integer", minimum: 0, description: "From the device, e.g. HealthKit — not derivable server-side." },
+                                    distanceMeters: { type: "number", minimum: 0 },
+                                    calorie: { type: "number", minimum: 0 },
+                                    startPoint: { type: "string" },
+                                    finishPoint: { type: "string" },
+                                    path: {
+                                        type: "array",
+                                        description: "The device's recorded breadcrumb for the walked route, in order. May be empty.",
+                                        items: {
+                                            type: "object",
+                                            required: ["lat", "lng"],
+                                            properties: {
+                                                lat: { type: "number" },
+                                                lng: { type: "number" },
+                                                recordedAt: { type: "string", format: "date-time" },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            example: {
+                                stepsTaken: 4213,
+                                distanceMeters: 2870.5,
+                                calorie: 165,
+                                startPoint: "Jl. Merdeka",
+                                finishPoint: "Taman Kota",
+                                path: [
+                                    { lat: -6.914744, lng: 107.60981, recordedAt: "2026-08-19T02:00:00.000Z" },
+                                    { lat: -6.914521, lng: 107.610432, recordedAt: "2026-08-19T02:00:15.000Z" },
+                                ],
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    "200": {
+                        description: "Journey attempt completed (or already was — left unchanged).",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["journeyAttempt", "steps", "summary", "path"],
+                                    properties: {
+                                        journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" },
+                                        steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
+                                        summary: { $ref: "#/components/schemas/JourneySummary" },
+                                        path: { type: "array", items: { $ref: "#/components/schemas/JourneyPathPoint" } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "At least one step isn't `status: \"done\"` yet, or the body is missing/invalid fields.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        error: { type: "string" },
+                                        pendingStepIds: { type: "array", items: { type: "string", format: "uuid" } },
+                                    },
+                                },
+                                examples: {
+                                    pendingSteps: {
+                                        value: { error: "Every step must be done before completing this journey", pendingStepIds: ["6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f"] },
+                                    },
+                                    invalidBody: { value: { error: "Invalid distanceMeters" } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No journey attempt with this id belonging to the caller.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Journey not found" },
+                            },
+                        },
+                    },
+                    "409": {
+                        description: "The attempt isn't active (e.g. abandoned) and can't be completed.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Journey is not active" },
                             },
                         },
                     },

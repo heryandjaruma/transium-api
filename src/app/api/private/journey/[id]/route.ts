@@ -39,7 +39,16 @@ type JourneySummaryRow = {
     finishPoint: string;
 };
 
-/** Returns a single journey attempt belonging to the caller, with its steps and summary (if ended). */
+type JourneyPathPointRow = {
+    id: string;
+    journeyAttemptId: string;
+    sequence: number;
+    lat: number;
+    lng: number;
+    recordedAt: string | null;
+};
+
+/** Returns a single journey attempt belonging to the caller, with its steps, summary, and walked path (empty/null until ended). */
 export async function GET(request: NextRequest, { params }: Params) {
     const { id } = await params;
     const session = await getAuth().api.getSession({ headers: request.headers });
@@ -71,5 +80,10 @@ export async function GET(request: NextRequest, { params }: Params) {
         .bind(id)
         .first<JourneySummaryRow>();
 
-    return NextResponse.json({ journeyAttempt, steps: stepsRes.results, summary: summary ?? null });
+    const pathRes = await env.DB
+        .prepare(`SELECT id, journeyAttemptId, sequence, lat, lng, recordedAt FROM JourneyPathPoint WHERE journeyAttemptId = ? ORDER BY sequence`)
+        .bind(id)
+        .all<JourneyPathPointRow>();
+
+    return NextResponse.json({ journeyAttempt, steps: stepsRes.results, summary: summary ?? null, path: pathRes.results });
 }
