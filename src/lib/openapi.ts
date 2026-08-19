@@ -1,10 +1,10 @@
 // OpenAPI document describing the public HTTP API. Served as JSON at
 // /api/openapi.json and rendered by Scalar at /reference.
 //
-// Only documents /api/astar, /api/journey/overview, /api/maps/route, /api/maps/search,
-// /api/maps/search/resolve, /api/maps/geocode, the Quest-tagged paths, and the
-// Journey-tagged /api/private/journey* paths for now — add other paths here as they
-// get documented.
+// Only documents /api/astar, the Trip-tagged /api/journey/overview and /api/journey/real,
+// /api/maps/route, /api/maps/search, /api/maps/search/resolve, /api/maps/geocode, the
+// Quest-tagged paths, and the Journey-tagged /api/private/journey* paths for now — add
+// other paths here as they get documented.
 
 const journeyStepSchema = {
     description:
@@ -63,6 +63,16 @@ export const openApiSpec = {
                 "one or more badges. A quest has no location of its own — it's reachable through any kelurahan " +
                 "that one of its badges is scoped to (Badge.kelurahanId), and its origin/destination coordinates " +
                 "for route preview come from its badges' step locations.",
+        },
+        {
+            name: "Trip",
+            description:
+                "Door-to-door routing between real coordinates, combining walking directions (via Apple Maps) " +
+                "with transit routing over the bus graph. `GET /journey/overview` plans between two arbitrary " +
+                "points; `GET /journey/real` plans from the caller's own position onto a quest's fixed route. " +
+                "Both search under two cost profiles (less walking vs. fewer transfers) and share the same " +
+                "response envelope — see either endpoint's description for the `alternativesAvailable`/`best`/ " +
+                "`lessWalking`/`lessTransit` shape.",
         },
         {
             name: "Journey",
@@ -728,6 +738,7 @@ export const openApiSpec = {
         // },
         "/journey/overview": {
             get: {
+                tags: ["Trip"],
                 summary: "Plan a door-to-door journey between two coordinates, less-walking and less-transit alike",
                 description:
                     "Finds a journey from an arbitrary origin to an arbitrary destination coordinate, combining " +
@@ -805,6 +816,103 @@ export const openApiSpec = {
                                     noRoute: { value: { error: "No route found" } },
                                     noWalkToStop: { value: { error: "No walking route to boarding stop" } },
                                     noWalkFromStop: { value: { error: "No walking route from alighting stop" } },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/journey/real": {
+            get: {
+                tags: ["Trip"],
+                summary: "Build the real, walkable journey for a quest from wherever the caller is",
+                description:
+                    "Builds the quest's actual route, starting from the caller's own position rather than the " +
+                    "quest's own first step. The leg from `origin` to the quest's first located waypoint is " +
+                    "routed exactly like /journey/overview — walking and/or transit, searched under both cost " +
+                    "profiles, since the caller could be anywhere relative to the quest. Every leg after that " +
+                    "is the quest's own fixed route: its ordered checkpoints across all attached badges' " +
+                    "BadgeActions that carry a lat/lng (in badge-attachment then step-sequence order — the same " +
+                    "grouping GET /quest/{id} and POST /private/journey/go use), connected with real walking " +
+                    "routes from Apple Maps all the way to the quest's last checkpoint.\n\n" +
+                    "The response is the same envelope /journey/overview returns, tagged with `questId`, " +
+                    "except `destination` on every journey is always the quest's last checkpoint rather than " +
+                    "something the caller passed in.\n\n" +
+                    alternativesEnvelopeDescription,
+                parameters: [
+                    {
+                        name: "origin",
+                        in: "query",
+                        required: true,
+                        description: "Caller's current position, as `lat,lng`.",
+                        schema: { type: "string" },
+                        example: "-8.6705,115.2126",
+                    },
+                    {
+                        name: "questId",
+                        in: "query",
+                        required: true,
+                        description: "The quest to build the route for.",
+                        schema: { type: "string", format: "uuid" },
+                    },
+                ],
+                responses: {
+                    "200": {
+                        description: "Journey built.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    allOf: [
+                                        {
+                                            type: "object",
+                                            required: ["questId", "alternativesAvailable", "best"],
+                                            properties: {
+                                                questId: { type: "string", format: "uuid" },
+                                                alternativesAvailable: {
+                                                    type: "boolean",
+                                                    description:
+                                                        "true when lessWalking and lessTransit found genuinely different " +
+                                                        "origin-to-first-waypoint legs (both are then included alongside " +
+                                                        "best); false when they agree or only one exists (only best is " +
+                                                        "included).",
+                                                },
+                                                best: { $ref: "#/components/schemas/JourneyResult" },
+                                                lessWalking: { $ref: "#/components/schemas/JourneyResult" },
+                                                lessTransit: { $ref: "#/components/schemas/JourneyResult" },
+                                            },
+                                        },
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Missing/invalid `origin`/`questId`, or the quest has no located steps to route to.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: { error: { type: "string" } },
+                                },
+                                examples: {
+                                    invalid: { value: { error: "Invalid arguments" } },
+                                    noWaypoints: { value: { error: "This quest has no located steps to route to" } },
+                                },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "Quest not found, no journey could be found to the first waypoint, or Apple Maps returned no walking directions for a required leg.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: { error: { type: "string" } },
+                                },
+                                examples: {
+                                    questNotFound: { value: { error: "Quest not found" } },
+                                    noRoute: { value: { error: "No route found" } },
                                 },
                             },
                         },
