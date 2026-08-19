@@ -532,7 +532,7 @@ export const openApiSpec = {
                     questName: { type: "string" },
                     questCategory: { type: "string" },
                     currentStepSequence: { type: "integer", description: "0 until the user completes their first step." },
-                    status: { type: "string", description: "e.g. \"started\", \"completed\"." },
+                    status: { type: "string", description: "e.g. \"started\", \"completed\", \"canceled\"." },
                     createdAt: { type: "string", format: "date-time" },
                     startedAt: { oneOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
                     endedAt: { oneOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
@@ -1539,7 +1539,64 @@ export const openApiSpec = {
                         },
                     },
                     "409": {
-                        description: "The attempt isn't active (e.g. abandoned) and can't be completed.",
+                        description: "The attempt isn't active (e.g. already canceled) and can't be completed.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Journey is not active" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/journey/{id}/cancel": {
+            post: {
+                tags: ["Journey"],
+                summary: "Cancel a journey attempt",
+                description:
+                    "Cancels a journey attempt, freeing the caller up to start a new one — a JourneyAttempt " +
+                    "with `status: \"started\"` blocks POST .../go for that user until it's completed or " +
+                    "cancelled. Marks the JourneyAttempt `status: \"canceled\"` with `endedAt`; the parent " +
+                    "UserQuest is left as-is (still `status: \"in_progress\"`) so a later POST .../go for the " +
+                    "same quest reuses it rather than creating a duplicate.\n\n" +
+                    "Idempotent no-op (200, returning the existing attempt unchanged) if the attempt is already " +
+                    "`status: \"canceled\"`.",
+                security: [{ bearerAuth: [] }],
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+                responses: {
+                    "200": {
+                        description: "Journey attempt canceled (or already was — left unchanged).",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["journeyAttempt"],
+                                    properties: { journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No journey attempt with this id belonging to the caller.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Journey not found" },
+                            },
+                        },
+                    },
+                    "409": {
+                        description: "The attempt isn't active (e.g. already completed) and can't be canceled.",
                         content: {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
