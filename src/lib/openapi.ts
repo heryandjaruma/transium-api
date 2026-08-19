@@ -1,10 +1,10 @@
 // OpenAPI document describing the public HTTP API. Served as JSON at
 // /api/openapi.json and rendered by Scalar at /reference.
 //
-// Only documents /api/astar, /api/journey/overview, /api/maps/route, /api/maps/search,
-// /api/maps/search/resolve, /api/maps/geocode, the Quest-tagged paths, and the
-// Journey-tagged /api/private/journey* paths for now — add other paths here as they
-// get documented.
+// Only documents /api/astar, /api/journey/overview, /api/journey/real, /api/maps/route,
+// /api/maps/search, /api/maps/search/resolve, /api/maps/geocode, the Quest-tagged paths,
+// and the Journey-tagged /api/private/journey* paths for now — add other paths here as
+// they get documented.
 
 const journeyStepSchema = {
     description:
@@ -805,6 +805,78 @@ export const openApiSpec = {
                                     noRoute: { value: { error: "No route found" } },
                                     noWalkToStop: { value: { error: "No walking route to boarding stop" } },
                                     noWalkFromStop: { value: { error: "No walking route from alighting stop" } },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/journey/real": {
+            get: {
+                summary: "Build the real, walkable route for a quest",
+                description:
+                    "Builds the quest's actual route: the ordered checkpoints across its attached badges' " +
+                    "BadgeActions that carry a lat/lng (in badge-attachment then step-sequence order — the same " +
+                    "grouping GET /quest/{id} and POST /private/journey/go use), connected leg by leg with a " +
+                    "real walking route from Apple Maps.\n\n" +
+                    "Unlike /journey/overview (which routes between two arbitrary points and may use transit), " +
+                    "a quest's route is fixed by its own waypoints and is always walked start to finish, so the " +
+                    "response is a single result rather than the lessWalking/lessTransit envelope — `segments` " +
+                    "only ever contains `walk` entries.",
+                parameters: [
+                    {
+                        name: "questId",
+                        in: "query",
+                        required: true,
+                        description: "The quest to build the route for.",
+                        schema: { type: "string", format: "uuid" },
+                    },
+                ],
+                responses: {
+                    "200": {
+                        description: "Route built.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    allOf: [
+                                        { $ref: "#/components/schemas/JourneyResult" },
+                                        {
+                                            type: "object",
+                                            required: ["questId"],
+                                            properties: { questId: { type: "string", format: "uuid" } },
+                                        },
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Missing/invalid `questId`, or the quest has fewer than two located steps to walk between.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: { error: { type: "string" } },
+                                },
+                                examples: {
+                                    invalid: { value: { error: "Invalid arguments" } },
+                                    tooFewWaypoints: { value: { error: "This quest doesn't have enough located steps to walk a route" } },
+                                },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "Quest not found, or Apple Maps returned no walking directions for a required leg.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: { error: { type: "string" } },
+                                },
+                                examples: {
+                                    questNotFound: { value: { error: "Quest not found" } },
+                                    noRoute: { value: { error: "No route found" } },
                                 },
                             },
                         },

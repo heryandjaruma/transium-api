@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { getDirections } from "@/lib/apple-maps";
 import { buildGraph, haversine, Edge, WALK_SPEED_MPS } from "@/lib/bus-graph";
 import { astar, CostWeights } from "@/lib/astar";
 import { loadRouteShapes, withLegGeometry } from "@/lib/route-geometry";
 import { ROUTE_PROFILES, pathSignature, summarizePath } from "@/lib/path-cost";
+import { walkSegment } from "@/lib/journey-segments";
 import type { JourneyStep } from "@/lib/journey";
 
 type LatLng = { lat: number; lng: number };
@@ -41,43 +41,6 @@ function nearestStops(point: LatLng, stops: Map<string, Stop>, count: number, ra
 
     const withinRadius = ranked.filter((r) => r.distanceMeters <= radiusMeters).slice(0, count);
     return withinRadius.length ? withinRadius : ranked.slice(0, 1);
-}
-
-/** Gets a walking route from Apple Maps. */
-async function walkSegment(
-    env: CloudflareEnv,
-    from: LatLng & { name: string; stopId?: string },
-    to: LatLng & { name: string; stopId?: string }
-) {
-    const data = await getDirections(env, from, to, "Walking");
-    const route = data.routes?.[0];
-    if (!route) return null;
-
-    const geometry: LngLat[] = [];
-    const steps = (route.stepIndexes ?? []).map((i) => {
-        const step = data.steps![i];
-        const path = (data.stepPaths?.[step.stepPathIndex!] ?? []).map(
-            (loc): LngLat => [loc.longitude, loc.latitude]
-        );
-        // Step paths share their boundary point with the next step's path, per Apple's docs.
-        geometry.push(...(geometry.length ? path.slice(1) : path));
-        return {
-            instructions: step.instructions,
-            distanceMeters: step.distanceMeters,
-            durationSeconds: step.durationSeconds,
-            geometry: path,
-        };
-    });
-
-    return {
-        type: "walk" as const,
-        from,
-        to,
-        distanceMeters: route.distanceMeters ?? null,
-        durationSeconds: route.durationSeconds ?? null,
-        geometry,
-        steps,
-    };
 }
 
 /** Converts the A* path into bus and transfer segments. */
