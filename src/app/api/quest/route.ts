@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
-type QuestRow = { id: string; name: string; category: string; description: string };
+type QuestRow = { id: string; name: string; category: string; description: string; xp: number; label: string | null };
 type MediaRow = { id: string; createdAt: string; type: string; url: string };
 
 /** Attaches each quest's thumbnail media (via QuestMedia) in a single query. */
@@ -27,33 +27,47 @@ async function attachThumbnails(db: D1Database, quests: QuestRow[]) {
     return quests.map((quest) => ({ ...quest, thumbnails: thumbnailsByQuest.get(quest.id) ?? [] }));
 }
 
-/** Returns all quests, each with its thumbnail media. */
-export async function GET() {
+/** Returns all quests, each with its thumbnail media. Query: `label?` — filters to quests with that exact label (e.g. "recommended"). */
+export async function GET(request: NextRequest) {
+    const label = request.nextUrl.searchParams.get("label");
     const { env } = getCloudflareContext();
-    const res = await env.DB.prepare(`SELECT id, name, category, description FROM Quest`).all<QuestRow>();
+
+    const query = `SELECT id, name, category, description, xp, label FROM Quest${label ? " WHERE label = ?" : ""}`;
+    const stmt = label ? env.DB.prepare(query).bind(label) : env.DB.prepare(query);
+    const res = await stmt.all<QuestRow>();
+
     const quests = await attachThumbnails(env.DB, res.results);
     return NextResponse.json({ quests });
 }
 
-/** Creates a quest. Body: `{ name, category, description }`. */
+/** Creates a quest. Body: `{ name, category, description, xp?, label? }`. `xp` defaults to 0, `label` defaults to `null`. */
 export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => null);
-    const { name, category, description } = (body ?? {}) as Record<string, unknown>;
+    const { name, category, description, xp, label } = (body ?? {}) as Record<string, unknown>;
 
     if (
         typeof name !== "string" || !name.trim() ||
         typeof category !== "string" || !category.trim() ||
-        typeof description !== "string" || !description.trim()
+        typeof description !== "string" || !description.trim() ||
+        (xp !== undefined && (!Number.isInteger(xp) || (xp as number) < 0)) ||
+        (label !== undefined && label !== null && (typeof label !== "string" || !label.trim()))
     ) {
         return NextResponse.json({ error: "Invalid arguments" }, { status: 400 });
     }
 
     const { env } = getCloudflareContext();
     const id = crypto.randomUUID();
-    const quest: QuestRow = { id, name: name.trim(), category: category.trim(), description: description.trim() };
+    const quest: QuestRow = {
+        id,
+        name: name.trim(),
+        category: category.trim(),
+        description: description.trim(),
+        xp: xp !== undefined ? (xp as number) : 0,
+        label: typeof label === "string" ? label.trim() : null,
+    };
 
-    await env.DB.prepare(`INSERT INTO Quest (id, name, category, description) VALUES (?, ?, ?, ?)`)
-        .bind(quest.id, quest.name, quest.category, quest.description)
+    await env.DB.prepare(`INSERT INTO Quest (id, name, category, description, xp, label) VALUES (?, ?, ?, ?, ?, ?)`)
+        .bind(quest.id, quest.name, quest.category, quest.description, quest.xp, quest.label)
         .run();
 
     return NextResponse.json({ quest: { ...quest, thumbnails: [] } }, { status: 201 });

@@ -27,7 +27,7 @@ type Props = {
     onSaved: (quest: Quest) => void
 }
 
-const emptyForm = { name: "", category: "", description: "" }
+const emptyForm = { name: "", category: "", description: "", xp: "0", label: "" }
 
 /** Create/edit sheet for a quest. Once the quest exists (editing, or just created), also manages its thumbnails. */
 export function QuestFormSheet({ open, onOpenChange, quest, onSaved }: Props) {
@@ -39,7 +39,11 @@ export function QuestFormSheet({ open, onOpenChange, quest, onSaved }: Props) {
     useEffect(() => {
         if (!open) return
         setSavedQuest(quest)
-        setForm(quest ? { name: quest.name, category: quest.category, description: quest.description } : emptyForm)
+        setForm(
+            quest
+                ? { name: quest.name, category: quest.category, description: quest.description, xp: String(quest.xp), label: quest.label ?? "" }
+                : emptyForm
+        )
         setError(null)
     }, [open, quest])
 
@@ -51,14 +55,26 @@ export function QuestFormSheet({ open, onOpenChange, quest, onSaved }: Props) {
             setError("All fields are required")
             return
         }
+        const xp = Number(form.xp)
+        if (!Number.isInteger(xp) || xp < 0) {
+            setError("XP must be a whole number, 0 or greater")
+            return
+        }
 
         setSaving(true)
         setError(null)
         try {
+            const body = {
+                name: form.name.trim(),
+                category: form.category.trim(),
+                description: form.description.trim(),
+                xp,
+                label: form.label.trim() || null,
+            }
             const res = await fetch(isEditing ? `/api/quest/${savedQuest!.id}` : "/api/quest", {
                 method: isEditing ? "PATCH" : "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(form),
+                body: JSON.stringify(body),
             })
             const data = await res.json<{ quest?: Quest; error?: string }>().catch(() => null)
             if (!res.ok || !data?.quest) {
@@ -119,6 +135,30 @@ export function QuestFormSheet({ open, onOpenChange, quest, onSaved }: Props) {
                             onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                             disabled={saving}
                         />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                        <Label htmlFor="quest-xp">XP</Label>
+                        <Input
+                            id="quest-xp"
+                            type="number"
+                            min={0}
+                            step={1}
+                            value={form.xp}
+                            onChange={(e) => setForm((f) => ({ ...f, xp: e.target.value }))}
+                            disabled={saving}
+                        />
+                        <p className="text-xs text-muted-foreground">Added to a user&apos;s level when they complete this quest&apos;s journey.</p>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                        <Label htmlFor="quest-label">Label</Label>
+                        <Input
+                            id="quest-label"
+                            value={form.label}
+                            onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+                            placeholder="e.g. recommended"
+                            disabled={saving}
+                        />
+                        <p className="text-xs text-muted-foreground">Optional highlight tag. Leave blank for none.</p>
                     </div>
 
                     {error && <p className="text-sm text-destructive">{error}</p>}

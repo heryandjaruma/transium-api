@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 type KelurahanRow = { id: string; kelurahanName: string; kecamatanName: string };
-type QuestRow = { id: string; name: string; category: string; description: string };
+type QuestRow = { id: string; name: string; category: string; description: string; xp: number; label: string | null };
 type MediaRow = { id: string; createdAt: string; type: string; url: string };
 
 /**
@@ -16,7 +16,7 @@ export async function GET() {
     const questLinksRes = await env.DB
         .prepare(
             `SELECT DISTINCT k.id as kelurahanId, k.kelurahanName as kelurahanName, k.kecamatanName as kecamatanName,
-                    q.id as id, q.name as name, q.category as category, q.description as description
+                    q.id as id, q.name as name, q.category as category, q.description as description, q.xp as xp, q.label as label
              FROM Quest q
              JOIN QuestBadge qb ON qb.questId = q.id
              JOIN Badge b ON b.id = qb.badgeId

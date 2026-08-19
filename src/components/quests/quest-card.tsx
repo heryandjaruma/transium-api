@@ -43,8 +43,12 @@ export function QuestCard({ quest, onEdit, onDelete }: Props) {
                     <Badge variant="outline">{quest.category}</Badge>
                 </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-col gap-2">
                 <p className="line-clamp-2 text-muted-foreground">{quest.description}</p>
+                <div className="flex items-center gap-2">
+                    <Badge variant="secondary">{quest.xp} XP</Badge>
+                    {quest.label && <Badge>{quest.label}</Badge>}
+                </div>
             </CardContent>
             <CardFooter className="justify-end gap-2">
                 <Button variant="outline" size="sm" onClick={onEdit}>

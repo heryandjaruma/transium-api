@@ -1,0 +1,3 @@
+-- Migration number: 0013 	 2026-08-19T23:00:00.000Z
+
+ALTER TABLE Quest ADD COLUMN label TEXT;
