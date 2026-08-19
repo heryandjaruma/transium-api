@@ -71,7 +71,9 @@ export const openApiSpec = {
                 "Quests are the discoverable activities shown to end users, each carrying thumbnail media and " +
                 "one or more badges. A quest has no location of its own — it's reachable through any kelurahan " +
                 "that one of its badges is scoped to (Badge.kelurahanId), and its origin/destination coordinates " +
-                "for route preview come from its badges' step locations.",
+                "for route preview come from its badges' step locations. `GET /quest` lists every quest; " +
+                "`GET /private/quest` (requires `Authorization: Bearer <session-token>`) narrows that down to " +
+                "the quests the signed-in caller hasn't completed yet.",
         },
         {
             name: "Trip",
@@ -418,6 +420,24 @@ export const openApiSpec = {
                     xp: { type: "integer", description: "XP awarded to the caller's Profile.level on completing a journey for this quest." },
                     label: { type: ["string", "null"], description: "A highlight tag, e.g. \"recommended\". Null if unset. Filterable via GET /quest?label=." },
                     thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
+                },
+            },
+            QuestWithUserStatus: {
+                description: "A Quest plus the caller's own UserQuest.status against it, as returned by GET /private/quest.",
+                type: "object",
+                required: ["id", "name", "category", "description", "xp", "label", "thumbnails", "userQuestStatus"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    name: { type: "string" },
+                    category: { type: "string" },
+                    description: { type: "string" },
+                    xp: { type: "integer", description: "XP awarded to the caller's Profile.level on completing a journey for this quest." },
+                    label: { type: ["string", "null"], description: "A highlight tag, e.g. \"recommended\". Null if unset. Filterable via GET /private/quest?label=." },
+                    thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
+                    userQuestStatus: {
+                        type: ["string", "null"],
+                        description: "The caller's own UserQuest.status for this quest (e.g. \"bookmarked\", \"in_progress\"), or null if they've never touched it.",
+                    },
                 },
             },
             QuestBadgeEntry: {
@@ -1682,6 +1702,46 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 example: { error: "Photo not found" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/quest": {
+            get: {
+                tags: ["Quest"],
+                summary: "List quests the caller hasn't completed yet",
+                description:
+                    "Returns every Quest without a UserQuest row of `status: \"completed\"` for the caller, each " +
+                    "with its thumbnail media and `userQuestStatus` (the caller's own UserQuest.status for that " +
+                    "quest, or null if untouched) — the \"what can I do now\" list. Quests the caller has never " +
+                    "touched, bookmarked, or has in progress all still show up here (with `userQuestStatus` set " +
+                    "accordingly); only finished ones drop off. Query: `label?` — filters to quests with that " +
+                    "exact label (e.g. \"recommended\"), same as GET /quest.",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    { name: "label", in: "query", required: false, schema: { type: "string" }, description: "Filter to quests with this exact `label`." },
+                ],
+                responses: {
+                    "200": {
+                        description: "Quests found.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["quests"],
+                                    properties: { quests: { type: "array", items: { $ref: "#/components/schemas/QuestWithUserStatus" } } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
                             },
                         },
                     },

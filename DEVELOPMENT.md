@@ -81,6 +81,14 @@ Then do request for the private endpoint with the debug session like above.
 Header: Authorization: Bearer debug-token-123
 ```
 
+### Quest endpoints
+
+| Method | Path                  | Purpose                                                                 |
+| ------ | ---------------------- | ------------------------------------------------------------------------ |
+| GET    | `/api/private/quest`   | List quests the caller hasn't completed yet — the "what can I do now" list. Query: `label?`. |
+
+Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Quest" tag.
+
 ### Journey endpoints
 
 | Method | Path                          | Purpose                                                                        |
