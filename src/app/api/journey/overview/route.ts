@@ -12,8 +12,14 @@ type LngLat = [number, number];
 type Stop = { lat: number; lng: number; name: string };
 type PathStep = { stopId: string; via: (Edge & { geometry: LngLat[] }) | null };
 
-// How many nearby stops to consider as candidate boarding/alighting points.
-const CANDIDATE_STOP_COUNT = 5;
+// How many nearby stops to consider as candidate boarding/alighting points. This is
+// only a safety cap for pathologically dense clusters (e.g. multi-bay interchanges) —
+// MAX_WALK_RADIUS_METERS below is the real limiter. Keeping this low silently drops
+// legitimate candidates ranked by beeline distance: a stop that's a one-seat ride away
+// (or a short walk from the destination) can rank outside the top few nearest-by-air
+// stops when a transfer hub's several bays are all closer in a straight line, which
+// biases the search toward hubs over the stop that's actually cheapest to use.
+const CANDIDATE_STOP_COUNT = 20;
 // Only consider stops within this walking radius as candidates.
 const MAX_WALK_RADIUS_METERS = 1500;
 // Below this, walking the whole trip is considered even if a bus route exists.
