@@ -919,6 +919,44 @@ export const openApiSpec = {
                 },
             },
         },
+        "/private/journey/current": {
+            get: {
+                tags: ["Journey"],
+                summary: "Get the caller's in-progress journey attempt, if any",
+                description:
+                    "Returns the caller's currently in-progress JourneyAttempt (`status: \"started\"`), if " +
+                    "any, with its ordered JourneySteps. A user can only ever have one such attempt at a " +
+                    "time (see POST /private/journey/go), so this is a lookup, not a list. `journeyAttempt` " +
+                    "is `null` (with an empty `steps`) when the caller has nothing active.",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "The caller's in-progress journey attempt, or null.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["journeyAttempt", "steps"],
+                                    properties: {
+                                        journeyAttempt: { oneOf: [{ $ref: "#/components/schemas/JourneyAttempt" }, { type: "null" }] },
+                                        steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
         "/private/journey/{id}": {
             get: {
                 tags: ["Journey"],
