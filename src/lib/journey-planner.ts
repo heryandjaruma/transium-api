@@ -1,7 +1,7 @@
 import { buildGraph, haversine, Edge, Graph, WALK_SPEED_MPS } from "@/lib/bus-graph";
 import { astar, CostWeights } from "@/lib/astar";
 import { loadRouteShapes, withLegGeometry } from "@/lib/route-geometry";
-import { pathSignature, summarizePath } from "@/lib/path-cost";
+import { pathSignature } from "@/lib/path-cost";
 import { summarizeSegments, stepsFromSegments, walkSegment } from "@/lib/journey-segments";
 import type { JourneySegment, JourneyStep, JourneySummary, LatLng } from "@/lib/journey";
 
@@ -10,11 +10,15 @@ type LngLat = [number, number];
 type PathStep = { stopId: string; via: (Edge & { geometry: LngLat[] }) | null };
 type RouteRow = { ref: string; name: string; direction: string; color: string };
 
-// How many nearby stops to consider as candidate boarding/alighting points.
-const CANDIDATE_STOP_COUNT = 5;
-// Only consider stops within this walking radius as candidates.
+// Only offer a stop as a boarding/alighting point within this walking radius. This is
+// the only candidate filter now — see withVirtualEndpoints below for why there's no
+// separate top-N-by-beeline-distance cap: capping by count instead of just radius is
+// what let a closer, better stop get excluded from consideration entirely whenever a
+// cluster (e.g. a multi-bay interchange) put more than N stops nearer-by-air.
 const MAX_WALK_RADIUS_METERS = 1500;
-// Below this, walking the whole trip is considered even if a bus route exists.
+// Only offer a direct walk end-to-end (no transit at all) below this distance — even
+// if, past this distance, a straight-line walk happens to price out cheaper than every
+// transit option found, a multi-kilometer walk isn't a plan worth surfacing.
 const DIRECT_WALK_THRESHOLD_METERS = 1500;
 
 export type RoutingContext = {
@@ -34,14 +38,78 @@ export async function buildRoutingContext(db: D1Database): Promise<RoutingContex
     return { graph, stops, stopWaitSeconds, routeShapes, routesById };
 }
 
-/** Returns the nearest bus stops to a point. */
-function nearestStops(point: LatLng, stops: Map<string, Stop>, count: number, radiusMeters: number) {
-    const ranked = [...stops.entries()]
-        .map(([id, stop]) => ({ id, stop, distanceMeters: haversine(point, stop) }))
-        .sort((a, b) => a.distanceMeters - b.distanceMeters);
+const VIRTUAL_ORIGIN_ID = "__origin__";
+const VIRTUAL_DESTINATION_ID = "__destination__";
 
-    const withinRadius = ranked.filter((r) => r.distanceMeters <= radiusMeters).slice(0, count);
-    return withinRadius.length ? withinRadius : ranked.slice(0, 1);
+/**
+ * Grafts two request-scoped virtual nodes onto a copy of the base graph: `__origin__`,
+ * with a walking edge to every real stop within MAX_WALK_RADIUS_METERS of `origin`
+ * (plus a direct edge straight to `__destination__`, when that's short enough — see
+ * DIRECT_WALK_THRESHOLD_METERS), and `__destination__`, reachable by a walking edge
+ * from every real stop within radius of `destination`.
+ *
+ * This is what lets a single `astar` call stand in for what used to be an all-pairs
+ * search over a hand-picked candidate list: because "walk to the destination from
+ * here" is now a real edge available at *every* stop the search reaches — not just a
+ * handful pre-selected by beeline distance — `astar`'s own cost minimisation is what
+ * decides the boarding/alighting point, the same way it already decides every other
+ * hop in the trip. Both are priced exactly like a transfer (walking time +, for the
+ * origin side, the expected wait for a vehicle at the stop landed on) but flagged
+ * `isAccess: true` so astar.ts's edgeCost exempts them from `transferPenalty` —
+ * boarding/alighting isn't a mid-trip change of vehicle.
+ *
+ * The base graph and stop map are never mutated — `graph` is a shallow copy (edge
+ * arrays are only ever replaced, never pushed onto, for the handful of stops gaining
+ * an egress edge) so the same `ctx` can be reused across sibling calls (e.g. both cost
+ * profiles for one request) safely.
+ */
+function withVirtualEndpoints(
+    baseGraph: Graph,
+    stops: Map<string, Stop>,
+    stopWaitSeconds: Map<string, number>,
+    origin: LatLng,
+    destination: LatLng
+): { graph: Graph; stops: Map<string, Stop> } {
+    const graph: Graph = new Map(baseGraph);
+    const stopsWithVirtual = new Map(stops);
+    stopsWithVirtual.set(VIRTUAL_ORIGIN_ID, { ...origin, name: "Origin" });
+    stopsWithVirtual.set(VIRTUAL_DESTINATION_ID, { ...destination, name: "Destination" });
+
+    const originEdges: Edge[] = [];
+    for (const [id, stop] of stops) {
+        const originDist = haversine(origin, stop);
+        if (originDist <= MAX_WALK_RADIUS_METERS) {
+            const walkingTime = originDist / WALK_SPEED_MPS;
+            const waitingTime = stopWaitSeconds.get(id) ?? 0;
+            originEdges.push({
+                to: id, kind: "transfer", isAccess: true, distanceMeters: originDist,
+                inVehicleTime: 0, walkingTime, waitingTime, weight: walkingTime + waitingTime,
+            });
+        }
+
+        const destDist = haversine(destination, stop);
+        if (destDist <= MAX_WALK_RADIUS_METERS) {
+            const walkingTime = destDist / WALK_SPEED_MPS;
+            const egressEdge: Edge = {
+                to: VIRTUAL_DESTINATION_ID, kind: "transfer", isAccess: true, distanceMeters: destDist,
+                inVehicleTime: 0, walkingTime, waitingTime: 0, weight: walkingTime,
+            };
+            graph.set(id, [...(graph.get(id) ?? []), egressEdge]);
+        }
+    }
+
+    const directDist = haversine(origin, destination);
+    if (directDist <= DIRECT_WALK_THRESHOLD_METERS) {
+        const walkingTime = directDist / WALK_SPEED_MPS;
+        originEdges.push({
+            to: VIRTUAL_DESTINATION_ID, kind: "transfer", isAccess: true, distanceMeters: directDist,
+            inVehicleTime: 0, walkingTime, waitingTime: 0, weight: walkingTime,
+        });
+    }
+    graph.set(VIRTUAL_ORIGIN_ID, originEdges);
+    graph.set(VIRTUAL_DESTINATION_ID, []);
+
+    return { graph, stops: stopsWithVirtual };
 }
 
 /** Converts the A* path into bus and transfer segments. */
@@ -117,11 +185,11 @@ export type ProfileResult = { signature: string; journey: PlannedJourney } | nul
 
 /**
  * Plans a single door-to-door journey (walking + transit) between two points under one
- * cost profile. Searches every (boarding, alighting) candidate stop pair near
- * origin/destination and keeps whichever minimizes the weighted cost (walk-to-stop +
- * transit + walk-from-stop, all priced the way the profile prices everything else) —
- * see path-cost.ts for what a profile optimises for. Falls back to a single direct walk
- * segment when that's short enough and no slower than the best transit option found.
+ * cost profile. Runs one `astar` search from a virtual origin to a virtual destination
+ * node — see `withVirtualEndpoints` — so the boarding/alighting point is whatever the
+ * search itself finds cheapest under this profile's weights (path-cost.ts), rather than
+ * being pre-narrowed to a hand-picked candidate list. The result degenerates into a
+ * single direct walk segment automatically whenever that's what the search picked.
  *
  * `cache` dedupes by the winning path's stop sequence so two profiles that land on the
  * physically same route don't hit Apple Maps twice for identical walking legs — pass
@@ -140,38 +208,21 @@ export async function buildJourneyForProfile(
     const originName = origin.name ?? "Origin";
     const destinationName = destination.name ?? "Destination";
 
-    const originCandidates = nearestStops(origin, stops, CANDIDATE_STOP_COUNT, MAX_WALK_RADIUS_METERS);
-    const destCandidates = nearestStops(destination, stops, CANDIDATE_STOP_COUNT, MAX_WALK_RADIUS_METERS);
+    const { graph: searchGraph, stops: searchStops } = withVirtualEndpoints(graph, stops, stopWaitSeconds, origin, destination);
+    const rawPath = astar(searchGraph, searchStops, VIRTUAL_ORIGIN_ID, VIRTUAL_DESTINATION_ID, weights);
+    if (!rawPath) return null;
 
-    const directWalkMeters = haversine(origin, destination);
-    const directWalkSeconds = directWalkMeters / WALK_SPEED_MPS;
+    // Drop the two virtual endpoints. What's left, if anything, is the real transit
+    // path between the stop the search chose to board at and the one it chose to
+    // alight at. astar stores each entry's *outgoing* edge (path[i].via.to ===
+    // path[i+1].stopId), so it's the last real stop whose `via` needs resetting to
+    // null — it currently still points at the access-out edge into the virtual
+    // destination, which withLegGeometry below can't resolve (that id isn't in the
+    // real `stops` map it's given).
+    const realStops = rawPath.slice(1, -1);
+    const isDirectWalk = realStops.length === 0;
 
-    let best: { path: PathStep[]; totalSeconds: number; weightedCost: number } | null = null;
-
-    for (const oc of originCandidates) {
-        for (const dc of destCandidates) {
-            if (oc.id === dc.id) continue;
-            const path = astar(graph, stops, oc.id, dc.id, weights);
-            if (!path) continue;
-
-            const boardsAVehicle = path.some((step) => step.via?.kind === "ride");
-            const initialWaitSeconds = boardsAVehicle ? (stopWaitSeconds.get(oc.id) ?? 0) : 0;
-            const s = summarizePath(path, weights, initialWaitSeconds);
-
-            const walkToStopSeconds = oc.distanceMeters / WALK_SPEED_MPS;
-            const walkFromStopSeconds = dc.distanceMeters / WALK_SPEED_MPS;
-            const totalSeconds = walkToStopSeconds + s.totalSeconds + walkFromStopSeconds;
-            const weightedCost = weights.walkTimeWeight * (walkToStopSeconds + walkFromStopSeconds) + s.weightedCost;
-
-            if (!best || weightedCost < best.weightedCost) {
-                best = { path: path as PathStep[], totalSeconds, weightedCost };
-            }
-        }
-    }
-
-    const preferDirectWalk = !best || (directWalkMeters <= DIRECT_WALK_THRESHOLD_METERS && directWalkSeconds < best.totalSeconds);
-
-    if (preferDirectWalk) {
+    if (isDirectWalk) {
         const walk = await walkSegment(env, { ...origin, name: originName }, { ...destination, name: destinationName });
         if (!walk) return null;
         const journey = { segments: [walk], summary: summarizeSegments([walk]), steps: stepsFromSegments([walk]) };
@@ -179,13 +230,17 @@ export async function buildJourneyForProfile(
         // regardless of profile — give them a shared, constant signature.
         return { signature: "walk", journey };
     }
+    const path = [
+        ...realStops.slice(0, -1),
+        { stopId: realStops[realStops.length - 1].stopId, via: null },
+    ] as PathStep[];
 
-    const signature = pathSignature(best!.path);
+    const signature = pathSignature(path);
     if (!cache.has(signature)) {
         cache.set(
             signature,
             (async () => {
-                const pathWithGeometry = withLegGeometry(best!.path, stops, routeShapes) as PathStep[];
+                const pathWithGeometry = withLegGeometry(path, stops, routeShapes) as PathStep[];
 
                 const boardingStopId = pathWithGeometry[0].stopId;
                 const alightingStopId = pathWithGeometry[pathWithGeometry.length - 1].stopId;
