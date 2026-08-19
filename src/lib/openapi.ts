@@ -82,6 +82,17 @@ export const openApiSpec = {
                 "caller's own data.",
         },
         {
+            name: "Device",
+            description:
+                "Registers the caller's APNs device tokens so pushes can reach every device they're signed in " +
+                "on. The common flow is `POST /private/device` right after sign-in (and again whenever the OS " +
+                "hands the app a new/rotated token), and `DELETE /private/device` on sign-out. Registration is " +
+                "keyed by the token itself, not the user, so re-registering a token that belonged to a different " +
+                "account (e.g. a different user signing in on the same physical device) reassigns it rather than " +
+                "creating a duplicate. `POST /private/device/test` sends a canned push to verify setup end-to-end. " +
+                "All endpoints under this tag require `Authorization: Bearer <session-token>`.",
+        },
+        {
             name: "Location",
             description:
                 "Place search and geocoding for Bali. `GET /maps/search` gives as-you-type suggestions from " +
@@ -493,6 +504,16 @@ export const openApiSpec = {
                         description: "The Better Auth user's `image` (avatar URL). Set via POST/DELETE /private/profile/media.",
                     },
                     email: { type: "string", format: "email", description: "The Better Auth user's `email`. Not editable through this endpoint." },
+                },
+            },
+            DeviceToken: {
+                type: "object",
+                required: ["id", "environment", "createdAt", "updatedAt"],
+                properties: {
+                    id: { type: "string" },
+                    environment: { type: "string", enum: ["sandbox", "production"] },
+                    createdAt: { type: "string", format: "date-time" },
+                    updatedAt: { type: "string", format: "date-time" },
                 },
             },
             PlaceSuggestion: {
@@ -1164,6 +1185,197 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 example: { error: "Profile has no image" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/device": {
+            get: {
+                tags: ["Device"],
+                summary: "List the caller's registered devices",
+                description: "Returns one entry per APNs device token currently registered for the caller, most recently updated first.",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "Registered devices.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["deviceTokens"],
+                                    properties: { deviceTokens: { type: "array", items: { $ref: "#/components/schemas/DeviceToken" } } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                },
+            },
+            post: {
+                tags: ["Device"],
+                summary: "Register (or re-register) the caller's APNs device token",
+                description:
+                    "Call this right after sign-in, and again whenever the OS hands the app a new/rotated token. " +
+                    "Upserts by `token`: if the token was previously registered under a different user, it's " +
+                    "reassigned to the caller rather than duplicated, so the same device switching accounts stays " +
+                    "correct. A user may have any number of tokens registered at once, one per device.",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["token"],
+                                properties: {
+                                    token: { type: "string", description: "The APNs device token from `didRegisterForRemoteNotificationsWithDeviceToken`." },
+                                    environment: { type: "string", enum: ["sandbox", "production"], description: "Defaults to \"production\"." },
+                                },
+                            },
+                            example: { token: "a1b2c3...", environment: "production" },
+                        },
+                    },
+                },
+                responses: {
+                    "200": {
+                        description: "Device token registered.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", required: ["deviceToken"], properties: { deviceToken: { $ref: "#/components/schemas/DeviceToken" } } },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Invalid body, `token`, or `environment`.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                examples: {
+                                    invalidBody: { value: { error: "Invalid arguments" } },
+                                    invalidToken: { value: { error: "Invalid token" } },
+                                    invalidEnvironment: { value: { error: "Invalid environment" } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                },
+            },
+            delete: {
+                tags: ["Device"],
+                summary: "Unregister a device token",
+                description: "Call this on sign-out so the device stops receiving pushes for the caller. Only removes the token if it belongs to the caller.",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: { type: "object", required: ["token"], properties: { token: { type: "string" } } },
+                            example: { token: "a1b2c3..." },
+                        },
+                    },
+                },
+                responses: {
+                    "204": { description: "Device token removed." },
+                    "400": {
+                        description: "Invalid body or `token`.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Invalid token" },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No matching device token for the caller.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Device token not found" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/device/test": {
+            post: {
+                tags: ["Device"],
+                summary: "Send a test push to the caller's devices",
+                description:
+                    "Sends a canned test notification to every device the caller has registered, so APNs setup " +
+                    "can be verified end-to-end. Devices Apple reports as no-longer-valid are removed from " +
+                    "DeviceToken as a side effect.",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "Send attempted for each registered device (per-device success/failure, not overall success).",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["results"],
+                                    properties: {
+                                        results: {
+                                            type: "array",
+                                            items: {
+                                                type: "object",
+                                                required: ["token", "ok", "status"],
+                                                properties: {
+                                                    token: { type: "string" },
+                                                    ok: { type: "boolean" },
+                                                    status: { type: "integer", description: "The HTTP status APNs returned for this device." },
+                                                    reason: { type: "string", description: "APNs' error reason, present only when ok is false." },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "503": {
+                        description: "APNs credentials are not configured on the server.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "APNs is not configured" },
                             },
                         },
                     },

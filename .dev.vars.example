@@ -20,3 +20,13 @@ APPLE_PRIVATE_KEY=
 APPLE_MAPS_TEAM_ID=
 APPLE_MAPS_KEY_ID=
 APPLE_MAPS_PRIVATE_KEY=
+
+# Apple Push Notification service (APNs)
+# Generate a dedicated "Apple Push Notifications service (APNs)" key in the
+# Apple Developer portal (Certificates, Identifiers & Profiles > Keys) - do
+# not reuse the Sign in with Apple key. Leave blank to disable sending.
+APNS_TEAM_ID=
+APNS_KEY_ID=
+APNS_PRIVATE_KEY=
+# The push topic - the app's bundle identifier (see APPLE_APP_BUNDLE_IDENTIFIER).
+APNS_TOPIC=
