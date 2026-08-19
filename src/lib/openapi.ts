@@ -88,9 +88,10 @@ export const openApiSpec = {
             description:
                 "Endpoints for a signed-in user progressing through a quest. Starting a quest (`POST " +
                 "/private/journey/go`) creates a JourneyAttempt and flattens every BadgeAction across the quest's " +
-                "attached badges into an ordered list of JourneyStep rows the user works through. All endpoints " +
-                "under this tag require `Authorization: Bearer <session-token>` (see DEVELOPMENT.md for how to " +
-                "mint a debug session locally) and are scoped to the caller's own attempts.",
+                "attached badges into an ordered list of JourneyStep rows the user works through. Completing it " +
+                "(`PATCH /private/journey/{id}`) awards the quest's `xp` to the caller's Profile.level. All " +
+                "endpoints under this tag require `Authorization: Bearer <session-token>` (see DEVELOPMENT.md for " +
+                "how to mint a debug session locally) and are scoped to the caller's own attempts.",
         },
         {
             name: "Bookmark",
@@ -407,12 +408,13 @@ export const openApiSpec = {
             },
             Quest: {
                 type: "object",
-                required: ["id", "name", "category", "description", "thumbnails"],
+                required: ["id", "name", "category", "description", "xp", "thumbnails"],
                 properties: {
                     id: { type: "string", format: "uuid" },
                     name: { type: "string" },
                     category: { type: "string" },
                     description: { type: "string" },
+                    xp: { type: "integer", description: "XP awarded to the caller's Profile.level on completing a journey for this quest." },
                     thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
                 },
             },
@@ -470,12 +472,13 @@ export const openApiSpec = {
             },
             QuestDetail: {
                 type: "object",
-                required: ["id", "name", "category", "description", "thumbnails", "badges", "origin", "destination"],
+                required: ["id", "name", "category", "description", "xp", "thumbnails", "badges", "origin", "destination"],
                 properties: {
                     id: { type: "string", format: "uuid" },
                     name: { type: "string" },
                     category: { type: "string" },
                     description: { type: "string" },
+                    xp: { type: "integer", description: "XP awarded to the caller's Profile.level on completing a journey for this quest." },
                     thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
                     badges: { type: "array", items: { $ref: "#/components/schemas/QuestBadgeWithSteps" } },
                     origin: {
@@ -492,12 +495,13 @@ export const openApiSpec = {
             },
             QuestWithBadges: {
                 type: "object",
-                required: ["id", "name", "category", "description", "thumbnails", "badges"],
+                required: ["id", "name", "category", "description", "xp", "thumbnails", "badges"],
                 properties: {
                     id: { type: "string", format: "uuid" },
                     name: { type: "string" },
                     category: { type: "string" },
                     description: { type: "string" },
+                    xp: { type: "integer", description: "XP awarded to the caller's Profile.level on completing a journey for this quest." },
                     thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
                     badges: { type: "array", items: { $ref: "#/components/schemas/QuestBadgeEntry" } },
                 },
@@ -524,7 +528,7 @@ export const openApiSpec = {
                     questName: { type: "string" },
                     questCategory: { type: "string" },
                     currentStepSequence: { type: "integer", description: "0 until the user completes their first step." },
-                    status: { type: "string", description: "e.g. \"started\"." },
+                    status: { type: "string", description: "e.g. \"started\", \"completed\"." },
                     createdAt: { type: "string", format: "date-time" },
                     startedAt: { oneOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
                     endedAt: { oneOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
@@ -1313,6 +1317,83 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 example: { error: "Journey not found" },
+                            },
+                        },
+                    },
+                },
+            },
+            patch: {
+                tags: ["Journey"],
+                summary: "Complete a journey attempt",
+                description:
+                    "Completes one of the caller's own JourneyAttempts. Body: `{ status: \"completed\" }`. " +
+                    "Requires the attempt to currently be `status: \"started\"`. Marks the JourneyAttempt and its " +
+                    "UserQuest as completed (`endedAt`/`completedAt` set to now), then awards the quest's `xp` to " +
+                    "the caller's Profile.level, creating the Profile first if this is their first journey.",
+                security: [{ bearerAuth: [] }],
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["status"],
+                                properties: { status: { type: "string", enum: ["completed"] } },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    "200": {
+                        description: "Journey attempt completed and XP awarded.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["journeyAttempt", "xpAwarded", "profile"],
+                                    properties: {
+                                        journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" },
+                                        xpAwarded: { type: "integer", description: "The quest's `xp`, just added to `profile.level`." },
+                                        profile: { $ref: "#/components/schemas/Profile" },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "`status` is missing or not `\"completed\"`.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Invalid status" },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No journey attempt with this id belonging to the caller.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Journey not found" },
+                            },
+                        },
+                    },
+                    "409": {
+                        description: "The attempt is not currently `status: \"started\"` (already completed, or otherwise not in progress).",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Journey is not in progress" },
                             },
                         },
                     },
@@ -2285,6 +2366,7 @@ export const openApiSpec = {
             //                         name: { type: "string" },
             //                         category: { type: "string" },
             //                         description: { type: "string" },
+            //                         xp: { type: "integer", description: "Defaults to 0." },
             //                     },
             //                 },
             //             },
@@ -2332,6 +2414,7 @@ export const openApiSpec = {
                                         name: "Sanur Street",
                                         category: "Beaches",
                                         description: "Where earlybirds relax",
+                                        xp: 100,
                                         thumbnails: [],
                                         badges: [
                                             {
@@ -2388,7 +2471,7 @@ export const openApiSpec = {
             // patch: {
             //     tags: ["Quest"],
             //     summary: "Update a quest",
-            //     description: "Body may include any of `name`/`category`/`description`. Returns the same shape as GET.",
+            //     description: "Body may include any of `name`/`category`/`description`/`xp`. Returns the same shape as GET.",
             //     parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
             //     requestBody: {
             //         required: true,
@@ -2400,6 +2483,7 @@ export const openApiSpec = {
             //                         name: { type: "string" },
             //                         category: { type: "string" },
             //                         description: { type: "string" },
+            //                         xp: { type: "integer" },
             //                     },
             //                 },
             //             },

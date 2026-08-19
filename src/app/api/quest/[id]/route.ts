@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { pruneOrphanedMedia } from "@/lib/media-storage";
 
 type Params = { params: Promise<{ id: string }> };
-type QuestRow = { id: string; name: string; category: string; description: string };
+type QuestRow = { id: string; name: string; category: string; description: string; xp: number };
 type MediaRow = { id: string; createdAt: string; type: string; url: string };
 type QuestBadgeRow = { id: string; badgeId: string; badgeName: string; badgeCategory: string; badgeType: string; badgeImageUrl: string | null };
 type StepRow = {
@@ -19,10 +19,10 @@ type StepRow = {
 };
 type LatLng = { lat: number; lng: number };
 
-const UPDATABLE_FIELDS = ["name", "category", "description"] as const;
+const UPDATABLE_STRING_FIELDS = ["name", "category", "description"] as const;
 
 async function getQuestWithThumbnails(db: D1Database, id: string) {
-    const quest = await db.prepare(`SELECT id, name, category, description FROM Quest WHERE id = ?`).bind(id).first<QuestRow>();
+    const quest = await db.prepare(`SELECT id, name, category, description, xp FROM Quest WHERE id = ?`).bind(id).first<QuestRow>();
     if (!quest) return null;
 
     const media = await db
@@ -107,24 +107,33 @@ export async function GET(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ quest });
 }
 
-/** Updates a quest. Body may include any of `{ name, category, description }`. */
+/** Updates a quest. Body may include any of `{ name, category, description, xp }`. */
 export async function PATCH(request: NextRequest, { params }: Params) {
     const { id } = await params;
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== "object") {
         return NextResponse.json({ error: "Invalid arguments" }, { status: 400 });
     }
+    const bodyRecord = body as Record<string, unknown>;
 
     const fields: string[] = [];
-    const values: string[] = [];
-    for (const key of UPDATABLE_FIELDS) {
-        const value = (body as Record<string, unknown>)[key];
+    const values: (string | number)[] = [];
+    for (const key of UPDATABLE_STRING_FIELDS) {
+        const value = bodyRecord[key];
         if (value === undefined) continue;
         if (typeof value !== "string" || !value.trim()) {
             return NextResponse.json({ error: "Invalid arguments" }, { status: 400 });
         }
         fields.push(`${key} = ?`);
         values.push(value.trim());
+    }
+    if ("xp" in bodyRecord) {
+        const xp = bodyRecord.xp;
+        if (!Number.isInteger(xp) || (xp as number) < 0) {
+            return NextResponse.json({ error: "Invalid arguments" }, { status: 400 });
+        }
+        fields.push("xp = ?");
+        values.push(xp as number);
     }
 
     if (fields.length === 0) {

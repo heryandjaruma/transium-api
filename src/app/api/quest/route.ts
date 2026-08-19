@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
-type QuestRow = { id: string; name: string; category: string; description: string };
+type QuestRow = { id: string; name: string; category: string; description: string; xp: number };
 type MediaRow = { id: string; createdAt: string; type: string; url: string };
 
 /** Attaches each quest's thumbnail media (via QuestMedia) in a single query. */
@@ -30,30 +30,37 @@ async function attachThumbnails(db: D1Database, quests: QuestRow[]) {
 /** Returns all quests, each with its thumbnail media. */
 export async function GET() {
     const { env } = getCloudflareContext();
-    const res = await env.DB.prepare(`SELECT id, name, category, description FROM Quest`).all<QuestRow>();
+    const res = await env.DB.prepare(`SELECT id, name, category, description, xp FROM Quest`).all<QuestRow>();
     const quests = await attachThumbnails(env.DB, res.results);
     return NextResponse.json({ quests });
 }
 
-/** Creates a quest. Body: `{ name, category, description }`. */
+/** Creates a quest. Body: `{ name, category, description, xp? }`. `xp` defaults to 0. */
 export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => null);
-    const { name, category, description } = (body ?? {}) as Record<string, unknown>;
+    const { name, category, description, xp } = (body ?? {}) as Record<string, unknown>;
 
     if (
         typeof name !== "string" || !name.trim() ||
         typeof category !== "string" || !category.trim() ||
-        typeof description !== "string" || !description.trim()
+        typeof description !== "string" || !description.trim() ||
+        (xp !== undefined && (!Number.isInteger(xp) || (xp as number) < 0))
     ) {
         return NextResponse.json({ error: "Invalid arguments" }, { status: 400 });
     }
 
     const { env } = getCloudflareContext();
     const id = crypto.randomUUID();
-    const quest: QuestRow = { id, name: name.trim(), category: category.trim(), description: description.trim() };
+    const quest: QuestRow = {
+        id,
+        name: name.trim(),
+        category: category.trim(),
+        description: description.trim(),
+        xp: xp !== undefined ? (xp as number) : 0,
+    };
 
-    await env.DB.prepare(`INSERT INTO Quest (id, name, category, description) VALUES (?, ?, ?, ?)`)
-        .bind(quest.id, quest.name, quest.category, quest.description)
+    await env.DB.prepare(`INSERT INTO Quest (id, name, category, description, xp) VALUES (?, ?, ?, ?, ?)`)
+        .bind(quest.id, quest.name, quest.category, quest.description, quest.xp)
         .run();
 
     return NextResponse.json({ quest: { ...quest, thumbnails: [] } }, { status: 201 });
