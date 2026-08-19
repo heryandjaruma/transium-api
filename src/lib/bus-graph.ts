@@ -4,6 +4,13 @@ export type Edge = {
     distanceMeters: number;
     kind: "ride" | "transfer";
     routeId?: string;
+    // Marks a "transfer" edge as a walk straight to/from a request-scoped virtual
+    // origin/destination node (see journey-planner.ts's withVirtualEndpoints) rather
+    // than a real mid-trip change of vehicle — never set on anything buildGraph
+    // returns. astar.ts's edgeCost checks this to exempt the edge from
+    // transferPenalty: boarding/alighting isn't a transfer, it's the trip's own
+    // start/end.
+    isAccess?: boolean;
     // Cost components, seconds. Ride edges only ever populate inVehicleTime; transfer
     // edges only ever populate walkingTime/waitingTime. `weight` stays the sum of
     // whichever apply, so it keeps meaning "unweighted time for this edge" for callers

@@ -24,7 +24,7 @@ function edgeCost(edge: Edge, weights: CostWeights) {
     return edge.inVehicleTime
         + weights.walkTimeWeight * edge.walkingTime
         + weights.waitTimeWeight * edge.waitingTime
-        + (edge.kind === "transfer" ? weights.transferPenalty : 0)
+        + (edge.kind === "transfer" && !edge.isAccess ? weights.transferPenalty : 0)
 }
 
 export function astar(
