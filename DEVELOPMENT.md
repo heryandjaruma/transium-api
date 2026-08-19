@@ -80,8 +80,9 @@ Registers APNs device tokens so a user can be pushed to on more than one device.
 
 | Method | Path                  | Purpose                                                                 |
 | ------ | ---------------------- | ------------------------------------------------------------------------ |
-| GET    | `/api/private/device`  | List the caller's registered devices.                                  |
-| POST   | `/api/private/device`  | Register/re-register a device token. Body: `{ token, environment? }`.  |
-| DELETE | `/api/private/device`  | Unregister a device token. Body: `{ token }`.                          |
+| GET    | `/api/private/device`      | List the caller's registered devices.                                  |
+| POST   | `/api/private/device`      | Register/re-register a device token. Body: `{ token, environment? }`.  |
+| DELETE | `/api/private/device`      | Unregister a device token. Body: `{ token }`.                          |
+| POST   | `/api/private/device/test` | Send a test push to all of the caller's registered devices.            |
 
 Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Device" tag.

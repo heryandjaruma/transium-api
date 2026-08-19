@@ -89,7 +89,8 @@ export const openApiSpec = {
                 "hands the app a new/rotated token), and `DELETE /private/device` on sign-out. Registration is " +
                 "keyed by the token itself, not the user, so re-registering a token that belonged to a different " +
                 "account (e.g. a different user signing in on the same physical device) reassigns it rather than " +
-                "creating a duplicate. All endpoints under this tag require `Authorization: Bearer <session-token>`.",
+                "creating a duplicate. `POST /private/device/test` sends a canned push to verify setup end-to-end. " +
+                "All endpoints under this tag require `Authorization: Bearer <session-token>`.",
         },
         {
             name: "Location",
@@ -1318,6 +1319,63 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 example: { error: "Device token not found" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/device/test": {
+            post: {
+                tags: ["Device"],
+                summary: "Send a test push to the caller's devices",
+                description:
+                    "Sends a canned test notification to every device the caller has registered, so APNs setup " +
+                    "can be verified end-to-end. Devices Apple reports as no-longer-valid are removed from " +
+                    "DeviceToken as a side effect.",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "Send attempted for each registered device (per-device success/failure, not overall success).",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["results"],
+                                    properties: {
+                                        results: {
+                                            type: "array",
+                                            items: {
+                                                type: "object",
+                                                required: ["token", "ok", "status"],
+                                                properties: {
+                                                    token: { type: "string" },
+                                                    ok: { type: "boolean" },
+                                                    status: { type: "integer", description: "The HTTP status APNs returned for this device." },
+                                                    reason: { type: "string", description: "APNs' error reason, present only when ok is false." },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "503": {
+                        description: "APNs credentials are not configured on the server.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "APNs is not configured" },
                             },
                         },
                     },
