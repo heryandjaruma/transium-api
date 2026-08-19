@@ -3,6 +3,8 @@ export type QuestMedia = {
     createdAt: string
     type: string
     url: string
+    alt: string | null
+    copyright: string | null
 }
 
 export type Quest = {

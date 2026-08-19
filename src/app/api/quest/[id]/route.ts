@@ -4,7 +4,7 @@ import { pruneOrphanedMedia } from "@/lib/media-storage";
 
 type Params = { params: Promise<{ id: string }> };
 type QuestRow = { id: string; name: string; category: string; description: string; xp: number; label: string | null };
-type MediaRow = { id: string; createdAt: string; type: string; url: string };
+type MediaRow = { id: string; createdAt: string; type: string; url: string; alt: string | null; copyright: string | null };
 type QuestBadgeRow = { id: string; badgeId: string; badgeName: string; badgeCategory: string; badgeType: string; badgeImageUrl: string | null };
 type StepRow = {
     id: string;
@@ -27,7 +27,7 @@ async function getQuestWithThumbnails(db: D1Database, id: string) {
 
     const media = await db
         .prepare(
-            `SELECT m.id as id, m.createdAt as createdAt, m.type as type, m.url as url
+            `SELECT m.id as id, m.createdAt as createdAt, m.type as type, m.url as url, m.alt as alt, m.copyright as copyright
              FROM QuestMedia qm JOIN Media m ON m.id = qm.mediaId
              WHERE qm.questId = ?`
         )
