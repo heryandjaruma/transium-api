@@ -11,7 +11,7 @@ type OverviewStepRow = {
     instruction: string | null;
     actionName: string;
     actionDescription: string;
-    actionType: string;
+    type: string;
 };
 type JourneyAttemptRow = {
     id: string;
@@ -37,7 +37,9 @@ type JourneyStepRow = {
 /**
  * Returns the quest's badge-attached steps (BadgeAction joined with ActionDefinition),
  * flattened in badge-attachment then step-sequence order — the same "overview" GET
- * /quest/{id} groups by badge.
+ * /quest/{id} groups by badge. `type` ("required"/"optional") comes from BadgeAction
+ * itself, not ActionDefinition — the same action can be required in one badge's flow and
+ * optional in another's.
  */
 async function getQuestOverviewSteps(db: D1Database, questId: string): Promise<OverviewStepRow[]> {
     const badgesRes = await db.prepare(`SELECT badgeId FROM QuestBadge WHERE questId = ?`).bind(questId).all<QuestBadgeRow>();
@@ -47,8 +49,8 @@ async function getQuestOverviewSteps(db: D1Database, questId: string): Promise<O
     const placeholders = badgeIds.map(() => "?").join(", ");
     const stepsRes = await db
         .prepare(
-            `SELECT ba.badgeId, ba.sequence, ba.lat, ba.lng, ba.instruction,
-                    ad.name as actionName, ad.description as actionDescription, ad.type as actionType
+            `SELECT ba.badgeId, ba.sequence, ba.lat, ba.lng, ba.instruction, ba.type,
+                    ad.name as actionName, ad.description as actionDescription
              FROM BadgeAction ba
              JOIN ActionDefinition ad ON ad.id = ba.actionId
              WHERE ba.badgeId IN (${placeholders})
@@ -72,8 +74,9 @@ async function getQuestOverviewSteps(db: D1Database, questId: string): Promise<O
  * Finds or creates the caller's UserQuest for `questId`, then creates a JourneyAttempt
  * (`status: "started"`, `currentStepSequence: 0`) and a JourneyStep per BadgeAction in
  * the quest's overview (across all attached badges, in attachment/sequence order), each
- * carrying its action's name/description/type and lat/lng when the BadgeAction has one,
- * initialised as `status: "waiting"`.
+ * carrying its action's name/description, its BadgeAction's own `type`
+ * (`"required"`/`"optional"`), and lat/lng when the BadgeAction has one, initialised as
+ * `status: "waiting"`.
  *
  * Fails with 409 if the caller already has a JourneyAttempt with `status: "started"` for
  * *any* quest — only one journey can be in progress at a time — including
@@ -153,7 +156,7 @@ export async function POST(request: NextRequest) {
         sequence: index + 1,
         name: step.actionName,
         description: step.instruction ?? step.actionDescription,
-        type: step.actionType,
+        type: step.type,
         lat: step.lat,
         lng: step.lng,
         status: "waiting",

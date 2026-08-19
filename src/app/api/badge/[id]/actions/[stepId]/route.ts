@@ -7,24 +7,24 @@ type BadgeActionStepRow = {
     badgeId: string;
     actionId: string;
     actionName: string;
-    actionType: string;
+    type: string;
     sequence: number;
     lat: number | null;
     lng: number | null;
     instruction: string | null;
 };
-type StepPatch = { actionId?: string; sequence?: number; lat?: number | null; lng?: number | null; instruction?: string | null };
+type StepPatch = { actionId?: string; sequence?: number; type?: string; lat?: number | null; lng?: number | null; instruction?: string | null };
 
 const SELECT_STEP = `
-    SELECT ba.id, ba.badgeId, ba.actionId, ba.sequence, ba.lat, ba.lng, ba.instruction,
-           ad.name as actionName, ad.type as actionType
+    SELECT ba.id, ba.badgeId, ba.actionId, ba.sequence, ba.lat, ba.lng, ba.instruction, ba.type,
+           ad.name as actionName
     FROM BadgeAction ba
     JOIN ActionDefinition ad ON ad.id = ba.actionId
 `;
 
 function parseStepPatchBody(body: unknown) {
     if (!body || typeof body !== "object") return { error: "Invalid arguments" } as const;
-    const { actionId, sequence, lat, lng, instruction } = body as Record<string, unknown>;
+    const { actionId, sequence, type, lat, lng, instruction } = body as Record<string, unknown>;
 
     const patch: StepPatch = {};
 
@@ -35,6 +35,10 @@ function parseStepPatchBody(body: unknown) {
     if (sequence !== undefined) {
         if (typeof sequence !== "number" || !Number.isFinite(sequence)) return { error: "Invalid sequence" } as const;
         patch.sequence = sequence;
+    }
+    if (type !== undefined) {
+        if (type !== "required" && type !== "optional") return { error: "Invalid type" } as const;
+        patch.type = type;
     }
     if (lat !== undefined) {
         if (lat !== null && typeof lat !== "number") return { error: "Invalid lat" } as const;
@@ -52,7 +56,7 @@ function parseStepPatchBody(body: unknown) {
     return patch;
 }
 
-/** Updates a badge step. Body may include any of `{ actionId, sequence, lat, lng, instruction }`. */
+/** Updates a badge step. Body may include any of `{ actionId, sequence, type, lat, lng, instruction }` — `type` is `"required"` or `"optional"`. */
 export async function PATCH(request: NextRequest, { params }: Params) {
     const { id, stepId } = await params;
     const body = await request.json().catch(() => null);

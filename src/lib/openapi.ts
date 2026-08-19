@@ -379,13 +379,19 @@ export const openApiSpec = {
             },
             BadgeActionStep: {
                 type: "object",
-                required: ["id", "badgeId", "actionId", "actionName", "actionType", "sequence", "lat", "lng", "instruction"],
+                required: ["id", "badgeId", "actionId", "actionName", "type", "sequence", "lat", "lng", "instruction"],
                 properties: {
                     id: { type: "string", format: "uuid" },
                     badgeId: { type: "string", format: "uuid" },
                     actionId: { type: "string", format: "uuid" },
                     actionName: { type: "string" },
-                    actionType: { type: "string" },
+                    type: {
+                        type: "string",
+                        enum: ["required", "optional"],
+                        description:
+                            "The BadgeAction's own required/optional-ness for this step — not ActionDefinition.type, " +
+                            "since the same action can be required in one badge's flow and optional in another's.",
+                    },
                     sequence: { type: "integer", description: "Order of this step within its badge, ascending." },
                     lat: { type: ["number", "null"] },
                     lng: { type: ["number", "null"] },
@@ -480,7 +486,7 @@ export const openApiSpec = {
                     sequence: { type: "integer", description: "1-based, ordered across all of the quest's badges." },
                     name: { type: "string", description: "The step's ActionDefinition.name." },
                     description: { type: "string", description: "The BadgeAction's instruction, or ActionDefinition.description if unset." },
-                    type: { type: "string", description: "The step's ActionDefinition.type, e.g. \"required\"/\"optional\"." },
+                    type: { type: "string", enum: ["required", "optional"], description: "The step's BadgeAction.type." },
                     lat: { oneOf: [{ type: "number" }, { type: "null" }] },
                     lng: { oneOf: [{ type: "number" }, { type: "null" }] },
                     status: { type: "string", enum: ["waiting", "done"] },
@@ -1939,7 +1945,7 @@ export const openApiSpec = {
                                                         badgeId: "b0564b3e-4fb4-4790-82f6-ff820dbe5f8b",
                                                         actionId: "02115d76-7951-44d4-a2e5-a62bfc37dcfc",
                                                         actionName: "Walk",
-                                                        actionType: "required",
+                                                        type: "required",
                                                         sequence: 1,
                                                         lat: -8.6788,
                                                         lng: 115.2622,
@@ -1950,7 +1956,7 @@ export const openApiSpec = {
                                                         badgeId: "b0564b3e-4fb4-4790-82f6-ff820dbe5f8b",
                                                         actionId: "c06478e1-650d-4eee-a55b-41009cd0878e",
                                                         actionName: "Take Picture",
-                                                        actionType: "optional",
+                                                        type: "optional",
                                                         sequence: 2,
                                                         lat: -8.6705,
                                                         lng: 115.2646,
