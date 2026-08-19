@@ -628,7 +628,10 @@ export const openApiSpec = {
             },
             JourneySummary: {
                 type: "object",
-                required: ["id", "journeyAttemptId", "stepsTaken", "distanceMeters", "calorie", "startPoint", "finishPoint"],
+                required: [
+                    "id", "journeyAttemptId", "stepsTaken", "distanceMeters", "calorie", "startPoint", "finishPoint",
+                    "fuelCostSavedIdr", "rideHailingMotorcycleSavedIdr", "rideHailingCarSavedIdr",
+                ],
                 properties: {
                     id: { type: "string", format: "uuid" },
                     journeyAttemptId: { type: "string", format: "uuid" },
@@ -637,6 +640,24 @@ export const openApiSpec = {
                     calorie: { type: "number" },
                     startPoint: { type: "string" },
                     finishPoint: { type: "string" },
+                    fuelCostSavedIdr: {
+                        type: "integer",
+                        description:
+                            "Approximate IDR cost of the private-motorcycle fuel this distance would have used, " +
+                            "derived from `distanceMeters` (not a real fare quote) and rounded to the nearest Rp 5,000.",
+                    },
+                    rideHailingMotorcycleSavedIdr: {
+                        type: "integer",
+                        description:
+                            "Approximate IDR fare an ojek-online (ride-hailing motorcycle) trip of this distance " +
+                            "would have cost, derived from `distanceMeters` and rounded to the nearest Rp 5,000.",
+                    },
+                    rideHailingCarSavedIdr: {
+                        type: "integer",
+                        description:
+                            "Approximate IDR fare a ride-hailing car trip of this distance would have cost, " +
+                            "derived from `distanceMeters` and rounded to the nearest Rp 5,000.",
+                    },
                 },
             },
             JourneyPathPoint: {
