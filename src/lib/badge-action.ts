@@ -3,7 +3,7 @@ export type BadgeActionStep = {
     badgeId: string
     actionId: string
     actionName: string
-    actionType: string
+    type: string
     sequence: number
     lat: number | null
     lng: number | null

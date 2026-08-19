@@ -379,13 +379,19 @@ export const openApiSpec = {
             },
             BadgeActionStep: {
                 type: "object",
-                required: ["id", "badgeId", "actionId", "actionName", "actionType", "sequence", "lat", "lng", "instruction"],
+                required: ["id", "badgeId", "actionId", "actionName", "type", "sequence", "lat", "lng", "instruction"],
                 properties: {
                     id: { type: "string", format: "uuid" },
                     badgeId: { type: "string", format: "uuid" },
                     actionId: { type: "string", format: "uuid" },
                     actionName: { type: "string" },
-                    actionType: { type: "string" },
+                    type: {
+                        type: "string",
+                        enum: ["required", "optional"],
+                        description:
+                            "The BadgeAction's own required/optional-ness for this step — not ActionDefinition.type, " +
+                            "since the same action can be required in one badge's flow and optional in another's.",
+                    },
                     sequence: { type: "integer", description: "Order of this step within its badge, ascending." },
                     lat: { type: ["number", "null"] },
                     lng: { type: ["number", "null"] },
@@ -473,17 +479,41 @@ export const openApiSpec = {
             },
             JourneyAttemptStep: {
                 type: "object",
-                required: ["id", "journeyAttemptId", "sequence", "name", "description", "type", "lat", "lng", "status"],
+                required: ["id", "journeyAttemptId", "sequence", "name", "description", "type", "lat", "lng", "radiusMeters", "status"],
                 properties: {
                     id: { type: "string", format: "uuid" },
                     journeyAttemptId: { type: "string", format: "uuid" },
                     sequence: { type: "integer", description: "1-based, ordered across all of the quest's badges." },
-                    name: { type: "string", description: "The step's ActionDefinition.name." },
+                    name: {
+                        type: "string",
+                        description:
+                            "The step's ActionDefinition.name, or the literal `\"takePicture\"` for an artificial " +
+                            "photo checkpoint (see POST /private/journey/go).",
+                    },
                     description: { type: "string", description: "The BadgeAction's instruction, or ActionDefinition.description if unset." },
-                    type: { type: "string", description: "The step's ActionDefinition.type, e.g. \"required\"/\"optional\"." },
+                    type: { type: "string", enum: ["required", "optional"], description: "The step's BadgeAction.type." },
                     lat: { oneOf: [{ type: "number" }, { type: "null" }] },
                     lng: { oneOf: [{ type: "number" }, { type: "null" }] },
+                    radiusMeters: {
+                        oneOf: [{ type: "number" }, { type: "null" }],
+                        description:
+                            "Geofence tolerance for lat/lng, in meters — null when lat/lng is null. The same value " +
+                            "POST .../advance checks the submitted position against, so a client's " +
+                            "CLCircularRegion radius should match it exactly.",
+                    },
                     status: { type: "string", enum: ["waiting", "done"] },
+                },
+            },
+            JourneyGeofence: {
+                type: "object",
+                description: "A location a client should register a CLCircularRegion (or equivalent) for.",
+                required: ["stepId", "sequence", "lat", "lng", "radiusMeters"],
+                properties: {
+                    stepId: { type: "string", format: "uuid", description: "The JourneyAttemptStep this geofence belongs to." },
+                    sequence: { type: "integer" },
+                    lat: { type: "number" },
+                    lng: { type: "number" },
+                    radiusMeters: { type: "number", description: "Matches the same step's radiusMeters, and what POST .../advance checks against." },
                 },
             },
             JourneySummary: {
@@ -497,6 +527,19 @@ export const openApiSpec = {
                     calorie: { type: "number" },
                     startPoint: { type: "string" },
                     finishPoint: { type: "string" },
+                },
+            },
+            JourneyPathPoint: {
+                description: "One GPS sample from the device's recorded breadcrumb for a journey attempt, in walked order.",
+                type: "object",
+                required: ["id", "journeyAttemptId", "sequence", "lat", "lng", "recordedAt"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    journeyAttemptId: { type: "string", format: "uuid" },
+                    sequence: { type: "integer", description: "1-based, in walked order." },
+                    lat: { type: "number" },
+                    lng: { type: "number" },
+                    recordedAt: { oneOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
                 },
             },
             Bookmark: {
@@ -778,8 +821,18 @@ export const openApiSpec = {
                     "finding or creating their UserQuest for `questId` first. Flattens every BadgeAction across " +
                     "the quest's attached badges (in badge-attachment then step-sequence order — the same " +
                     "grouping GET /quest/{id} returns) into a JourneyStep per action, each initialised " +
-                    "`status: \"waiting\"`. Fails with 409 if the caller already has a JourneyAttempt with " +
-                    "`status: \"started\"` for this quest.",
+                    "`status: \"waiting\"`.\n\n" +
+                    "1-3 artificial `type: \"optional\"` steps (`name: \"takePicture\"`) are interleaved in — " +
+                    "one always lands on the route's first located waypoint (before the quest's own first " +
+                    "action), with up to two more spaced out by walked distance on longer routes — so the " +
+                    "user is prompted to document their journey even when none of the quest's own actions do. " +
+                    "None are added within ~600m of an existing \"take picture\"-like action.\n\n" +
+                    "`geofences` is every located step (real or artificial) as a `{ stepId, sequence, lat, lng, " +
+                    "radiusMeters }` the client should register a CLCircularRegion for — `radiusMeters` is the " +
+                    "same tolerance POST .../advance itself checks the submitted position against, so a " +
+                    "client-side region radius and the server's acceptance distance never disagree.\n\n" +
+                    "Fails with 409 if the caller already has a JourneyAttempt with `status: \"started\"` for " +
+                    "*any* quest — only one journey can be in progress at a time.",
                 security: [{ bearerAuth: [] }],
                 requestBody: {
                     required: true,
@@ -801,10 +854,11 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: {
                                     type: "object",
-                                    required: ["journeyAttempt", "steps"],
+                                    required: ["journeyAttempt", "steps", "geofences"],
                                     properties: {
                                         journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" },
                                         steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
+                                        geofences: { type: "array", items: { $ref: "#/components/schemas/JourneyGeofence" } },
                                     },
                                 },
                             },
@@ -841,11 +895,24 @@ export const openApiSpec = {
                         },
                     },
                     "409": {
-                        description: "The caller already has a journey in progress for this quest.",
+                        description: "The caller already has a journey in progress, for this quest or another one.",
                         content: {
                             "application/json": {
-                                schema: { type: "object", properties: { error: { type: "string" } } },
-                                example: { error: "A journey is already in progress for this quest" },
+                                schema: {
+                                    type: "object",
+                                    properties: { error: { type: "string" }, activeJourneyAttemptId: { type: "string", format: "uuid" } },
+                                },
+                                examples: {
+                                    sameQuest: {
+                                        value: { error: "A journey is already in progress for this quest", activeJourneyAttemptId: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f" },
+                                    },
+                                    otherQuest: {
+                                        value: {
+                                            error: "You already have a journey in progress for \"Kelurahan Sukamaju Explorer\" — finish that one before starting a new one",
+                                            activeJourneyAttemptId: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f",
+                                        },
+                                    },
+                                },
                             },
                         },
                     },
@@ -893,13 +960,52 @@ export const openApiSpec = {
                 },
             },
         },
+        "/private/journey/current": {
+            get: {
+                tags: ["Journey"],
+                summary: "Get the caller's in-progress journey attempt, if any",
+                description:
+                    "Returns the caller's currently in-progress JourneyAttempt (`status: \"started\"`), if " +
+                    "any, with its ordered JourneySteps. A user can only ever have one such attempt at a " +
+                    "time (see POST /private/journey/go), so this is a lookup, not a list. `journeyAttempt` " +
+                    "is `null` (with an empty `steps`) when the caller has nothing active.",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    "200": {
+                        description: "The caller's in-progress journey attempt, or null.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["journeyAttempt", "steps"],
+                                    properties: {
+                                        journeyAttempt: { oneOf: [{ $ref: "#/components/schemas/JourneyAttempt" }, { type: "null" }] },
+                                        steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
         "/private/journey/{id}": {
             get: {
                 tags: ["Journey"],
                 summary: "Get a single journey attempt",
                 description:
-                    "Returns one of the caller's own JourneyAttempts with its ordered JourneySteps and its " +
-                    "JourneySummary (`null` until the journey has ended).",
+                    "Returns one of the caller's own JourneyAttempts with its ordered JourneySteps, its " +
+                    "JourneySummary (`null` until the journey has ended), and its walked JourneyPathPoints " +
+                    "(empty until the journey has ended).",
                 security: [{ bearerAuth: [] }],
                 parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
                 responses: {
@@ -909,11 +1015,12 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: {
                                     type: "object",
-                                    required: ["journeyAttempt", "steps", "summary"],
+                                    required: ["journeyAttempt", "steps", "summary", "path"],
                                     properties: {
                                         journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" },
                                         steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
                                         summary: { oneOf: [{ $ref: "#/components/schemas/JourneySummary" }, { type: "null" }] },
+                                        path: { type: "array", items: { $ref: "#/components/schemas/JourneyPathPoint" } },
                                     },
                                 },
                             },
@@ -934,6 +1041,222 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 example: { error: "Journey not found" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/journey/{id}/advance": {
+            post: {
+                tags: ["Journey"],
+                summary: "Advance a journey attempt from a geofence trigger",
+                description:
+                    "Body: `{ stepId, lat, lng }` — the JourneyStep whose geofence just fired, plus the " +
+                    "device's current position, checked against that step's own lat/lng (within ~150m) so " +
+                    "arrival can't be spoofed.\n\n" +
+                    "The caller may be geofenced into a step ahead of `currentStepSequence` (e.g. they walked " +
+                    "past an optional photo stop without opening the app). Any `type: \"optional\"` step " +
+                    "skipped over is auto-marked `status: \"done\"`; any `type: \"required\"` step skipped " +
+                    "over is left `\"waiting\"` and caps how far `currentStepSequence` moves, since a required " +
+                    "step's completion can't be inferred from a later step's geofence alone. When every step " +
+                    "ends up `\"done\"`, the JourneyAttempt is marked `status: \"completed\"` and the parent " +
+                    "UserQuest moves to `status: \"completed\"` too.\n\n" +
+                    "Idempotent no-op (200, unchanged) when the attempt isn't `status: \"started\"` or the " +
+                    "target step is already `\"done\"` — both expected from geofence regions re-firing, or a " +
+                    "previous call's catch-up having already covered this step.",
+                security: [{ bearerAuth: [] }],
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["stepId", "lat", "lng"],
+                                properties: {
+                                    stepId: { type: "string", format: "uuid" },
+                                    lat: { type: "number" },
+                                    lng: { type: "number" },
+                                },
+                            },
+                            example: { stepId: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f", lat: -6.914744, lng: 107.60981 },
+                        },
+                    },
+                },
+                responses: {
+                    "200": {
+                        description: "Journey attempt advanced (or left unchanged, if there was nothing to do).",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["journeyAttempt", "steps"],
+                                    properties: {
+                                        journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" },
+                                        steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Missing/invalid `stepId` or `lat`/`lng`, the step has no lat/lng, or the submitted position is too far from it.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                examples: {
+                                    invalidStep: { value: { error: "Invalid stepId" } },
+                                    invalidLatLng: { value: { error: "Invalid lat/lng" } },
+                                    notLocationBased: { value: { error: "This step isn't location-based" } },
+                                    tooFar: { value: { error: "Too far from this step's location" } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No journey attempt with this id belonging to the caller, or no such step on it.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                examples: {
+                                    noAttempt: { value: { error: "Journey not found" } },
+                                    noStep: { value: { error: "Journey step not found" } },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/journey/{id}/complete": {
+            post: {
+                tags: ["Journey"],
+                summary: "Explicitly complete a journey attempt",
+                description:
+                    "Unlike POST .../advance, this endpoint never marks steps done itself — it only " +
+                    "finalizes an attempt whose JourneySteps are already all `status: \"done\"` (via advance, " +
+                    "or any other completion path), guarding against finishing early. Marks the " +
+                    "JourneyAttempt `status: \"completed\"` with `endedAt`, the parent UserQuest " +
+                    "`status: \"completed\"`, and writes the JourneySummary and JourneyPathPoints from the " +
+                    "request body.\n\n" +
+                    "Idempotent no-op (200, returning the existing summary/path unchanged) if the attempt is " +
+                    "already `status: \"completed\"` — the body isn't parsed in that case.",
+                security: [{ bearerAuth: [] }],
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["stepsTaken", "distanceMeters", "calorie", "startPoint", "finishPoint", "path"],
+                                properties: {
+                                    stepsTaken: { type: "integer", minimum: 0, description: "From the device, e.g. HealthKit — not derivable server-side." },
+                                    distanceMeters: { type: "number", minimum: 0 },
+                                    calorie: { type: "number", minimum: 0 },
+                                    startPoint: { type: "string" },
+                                    finishPoint: { type: "string" },
+                                    path: {
+                                        type: "array",
+                                        description: "The device's recorded breadcrumb for the walked route, in order. May be empty.",
+                                        items: {
+                                            type: "object",
+                                            required: ["lat", "lng"],
+                                            properties: {
+                                                lat: { type: "number" },
+                                                lng: { type: "number" },
+                                                recordedAt: { type: "string", format: "date-time" },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                            example: {
+                                stepsTaken: 4213,
+                                distanceMeters: 2870.5,
+                                calorie: 165,
+                                startPoint: "Jl. Merdeka",
+                                finishPoint: "Taman Kota",
+                                path: [
+                                    { lat: -6.914744, lng: 107.60981, recordedAt: "2026-08-19T02:00:00.000Z" },
+                                    { lat: -6.914521, lng: 107.610432, recordedAt: "2026-08-19T02:00:15.000Z" },
+                                ],
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    "200": {
+                        description: "Journey attempt completed (or already was — left unchanged).",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["journeyAttempt", "steps", "summary", "path"],
+                                    properties: {
+                                        journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" },
+                                        steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
+                                        summary: { $ref: "#/components/schemas/JourneySummary" },
+                                        path: { type: "array", items: { $ref: "#/components/schemas/JourneyPathPoint" } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "At least one step isn't `status: \"done\"` yet, or the body is missing/invalid fields.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        error: { type: "string" },
+                                        pendingStepIds: { type: "array", items: { type: "string", format: "uuid" } },
+                                    },
+                                },
+                                examples: {
+                                    pendingSteps: {
+                                        value: { error: "Every step must be done before completing this journey", pendingStepIds: ["6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f"] },
+                                    },
+                                    invalidBody: { value: { error: "Invalid distanceMeters" } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No journey attempt with this id belonging to the caller.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Journey not found" },
+                            },
+                        },
+                    },
+                    "409": {
+                        description: "The attempt isn't active (e.g. abandoned) and can't be completed.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Journey is not active" },
                             },
                         },
                     },
@@ -1657,7 +1980,7 @@ export const openApiSpec = {
                                                         badgeId: "b0564b3e-4fb4-4790-82f6-ff820dbe5f8b",
                                                         actionId: "02115d76-7951-44d4-a2e5-a62bfc37dcfc",
                                                         actionName: "Walk",
-                                                        actionType: "required",
+                                                        type: "required",
                                                         sequence: 1,
                                                         lat: -8.6788,
                                                         lng: 115.2622,
@@ -1668,7 +1991,7 @@ export const openApiSpec = {
                                                         badgeId: "b0564b3e-4fb4-4790-82f6-ff820dbe5f8b",
                                                         actionId: "c06478e1-650d-4eee-a55b-41009cd0878e",
                                                         actionName: "Take Picture",
-                                                        actionType: "optional",
+                                                        type: "optional",
                                                         sequence: 2,
                                                         lat: -8.6705,
                                                         lng: 115.2646,

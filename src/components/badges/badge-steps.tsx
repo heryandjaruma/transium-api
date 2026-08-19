@@ -16,6 +16,7 @@ type Props = {
 type StepForm = {
     actionId: string
     sequence: string
+    type: "required" | "optional"
     lat: string
     lng: string
     instruction: string
@@ -26,13 +27,14 @@ function nextSequenceFor(steps: BadgeActionStep[]) {
 }
 
 function emptyStepForm(sequence: number): StepForm {
-    return { actionId: "", sequence: String(sequence), lat: "", lng: "", instruction: "" }
+    return { actionId: "", sequence: String(sequence), type: "required", lat: "", lng: "", instruction: "" }
 }
 
 function stepToForm(step: BadgeActionStep): StepForm {
     return {
         actionId: step.actionId,
         sequence: String(step.sequence),
+        type: step.type === "optional" ? "optional" : "required",
         lat: step.lat !== null ? String(step.lat) : "",
         lng: step.lng !== null ? String(step.lng) : "",
         instruction: step.instruction ?? "",
@@ -108,6 +110,7 @@ export function BadgeSteps({ badgeId }: Props) {
         return {
             actionId: form.actionId,
             sequence,
+            type: form.type,
             lat: form.lat.trim() ? Number(form.lat) : null,
             lng: form.lng.trim() ? Number(form.lng) : null,
             instruction: form.instruction.trim() || null,
@@ -223,7 +226,7 @@ export function BadgeSteps({ badgeId }: Props) {
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-center gap-2">
                                                 <span className="truncate text-sm font-medium">{step.actionName}</span>
-                                                <span className="text-xs text-muted-foreground">{step.actionType}</span>
+                                                <span className="text-xs text-muted-foreground">{step.type}</span>
                                             </div>
                                             {(step.instruction || step.lat !== null) && (
                                                 <p className="truncate text-xs text-muted-foreground">
@@ -337,6 +340,19 @@ function StepFormRow({
                     onChange={(e) => setForm((f) => ({ ...f, sequence: e.target.value }))}
                     className="w-24"
                 />
+                <Select
+                    value={form.type}
+                    onValueChange={(value) => setForm((f) => ({ ...f, type: value as "required" | "optional" }))}
+                    items={{ required: "Required", optional: "Optional" }}
+                >
+                    <SelectTrigger size="sm" className="w-32">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="required">Required</SelectItem>
+                        <SelectItem value="optional">Optional</SelectItem>
+                    </SelectContent>
+                </Select>
             </div>
             <div className="flex flex-wrap gap-2">
                 <Input

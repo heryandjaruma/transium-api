@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getAuth } from "@/lib/auth";
 
-type Params = { params: Promise<{ id: string }> };
-
 type JourneyAttemptRow = {
     id: string;
     userQuestId: string;
@@ -30,28 +28,14 @@ type JourneyStepRow = {
     status: string;
 };
 
-type JourneySummaryRow = {
-    id: string;
-    journeyAttemptId: string;
-    stepsTaken: number;
-    distanceMeters: number;
-    calorie: number;
-    startPoint: string;
-    finishPoint: string;
-};
-
-type JourneyPathPointRow = {
-    id: string;
-    journeyAttemptId: string;
-    sequence: number;
-    lat: number;
-    lng: number;
-    recordedAt: string | null;
-};
-
-/** Returns a single journey attempt belonging to the caller, with its steps, summary, and walked path (empty/null until ended). */
-export async function GET(request: NextRequest, { params }: Params) {
-    const { id } = await params;
+/**
+ * Returns the caller's currently in-progress journey attempt (`status: "started"`), if
+ * any, with its ordered steps — a user can only ever have one such attempt at a time
+ * (see POST /private/journey/go), so this is a lookup, not a list. `journeyAttempt` is
+ * `null` (with an empty `steps`) when the caller has nothing active, e.g. on app launch
+ * before deciding whether to resume a journey or offer to start one.
+ */
+export async function GET(request: NextRequest) {
     const session = await getAuth().api.getSession({ headers: request.headers });
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -64,27 +48,19 @@ export async function GET(request: NextRequest, { params }: Params) {
              FROM JourneyAttempt ja
              JOIN UserQuest uq ON uq.id = ja.userQuestId
              JOIN Quest q ON q.id = uq.questId
-             WHERE ja.id = ? AND uq.userId = ?`
+             WHERE uq.userId = ? AND ja.status = 'started'`
         )
-        .bind(id, session.user.id)
+        .bind(session.user.id)
         .first<JourneyAttemptRow>();
 
-    if (!journeyAttempt) return NextResponse.json({ error: "Journey not found" }, { status: 404 });
+    if (!journeyAttempt) {
+        return NextResponse.json({ journeyAttempt: null, steps: [] });
+    }
 
     const stepsRes = await env.DB
         .prepare(`SELECT id, journeyAttemptId, sequence, name, description, type, lat, lng, radiusMeters, status FROM JourneyStep WHERE journeyAttemptId = ? ORDER BY sequence`)
-        .bind(id)
+        .bind(journeyAttempt.id)
         .all<JourneyStepRow>();
 
-    const summary = await env.DB
-        .prepare(`SELECT id, journeyAttemptId, stepsTaken, distanceMeters, calorie, startPoint, finishPoint FROM JourneySummary WHERE journeyAttemptId = ?`)
-        .bind(id)
-        .first<JourneySummaryRow>();
-
-    const pathRes = await env.DB
-        .prepare(`SELECT id, journeyAttemptId, sequence, lat, lng, recordedAt FROM JourneyPathPoint WHERE journeyAttemptId = ? ORDER BY sequence`)
-        .bind(id)
-        .all<JourneyPathPointRow>();
-
-    return NextResponse.json({ journeyAttempt, steps: stepsRes.results, summary: summary ?? null, path: pathRes.results });
+    return NextResponse.json({ journeyAttempt, steps: stepsRes.results });
 }

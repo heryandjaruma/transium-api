@@ -1,0 +1,153 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { getAuth } from "@/lib/auth";
+import { haversine } from "@/lib/bus-graph";
+
+type Params = { params: Promise<{ id: string }> };
+
+// Fallback for JourneyStep rows created before radiusMeters existed (pre-migration 0011).
+// Otherwise every step carries its own radius, set at creation by POST .../go, so the
+// client's CLCircularRegion and this check always agree on what counts as "arrived".
+const DEFAULT_GEOFENCE_TOLERANCE_METERS = 150;
+
+type JourneyAttemptRow = {
+    id: string;
+    userQuestId: string;
+    questId: string;
+    questName: string;
+    questCategory: string;
+    currentStepSequence: number;
+    status: string;
+    createdAt: string;
+    startedAt: string | null;
+    endedAt: string | null;
+};
+
+type JourneyStepRow = {
+    id: string;
+    journeyAttemptId: string;
+    sequence: number;
+    name: string;
+    description: string;
+    type: string;
+    lat: number | null;
+    lng: number | null;
+    radiusMeters: number | null;
+    status: string;
+};
+
+/**
+ * Advances a journey attempt from a geofence trigger. Body: `{ stepId, lat, lng }` — the
+ * JourneyStep whose geofence just fired, plus the device's current position, checked
+ * against that step's own lat/lng so arrival can't be spoofed.
+ *
+ * The caller may be geofenced into a step ahead of `currentStepSequence` (e.g. they
+ * walked past an optional photo stop without opening the app). Any `type: "optional"`
+ * step skipped over is auto-marked `status: "done"`; any `type: "required"` step skipped
+ * over is left `"waiting"` and caps how far `currentStepSequence` moves, since a required
+ * step's completion can't be inferred from a later step's geofence alone.
+ *
+ * Idempotent no-op (200, unchanged) when the attempt isn't `status: "started"` or the
+ * target step is already `"done"` — both expected from geofence regions re-firing, or a
+ * previous call's catch-up having already covered this step.
+ */
+export async function POST(request: NextRequest, { params }: Params) {
+    const { id } = await params;
+    const session = await getAuth().api.getSession({ headers: request.headers });
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const body = await request.json().catch(() => null);
+    const { stepId, lat, lng } = (body ?? {}) as Record<string, unknown>;
+
+    if (typeof stepId !== "string" || !stepId.trim()) {
+        return NextResponse.json({ error: "Invalid stepId" }, { status: 400 });
+    }
+    if (typeof lat !== "number" || !Number.isFinite(lat) || typeof lng !== "number" || !Number.isFinite(lng)) {
+        return NextResponse.json({ error: "Invalid lat/lng" }, { status: 400 });
+    }
+
+    const { env } = getCloudflareContext();
+
+    const journeyAttempt = await env.DB
+        .prepare(
+            `SELECT ja.id, ja.userQuestId, uq.questId, q.name as questName, q.category as questCategory,
+                    ja.currentStepSequence, ja.status, ja.createdAt, ja.startedAt, ja.endedAt
+             FROM JourneyAttempt ja
+             JOIN UserQuest uq ON uq.id = ja.userQuestId
+             JOIN Quest q ON q.id = uq.questId
+             WHERE ja.id = ? AND uq.userId = ?`
+        )
+        .bind(id, session.user.id)
+        .first<JourneyAttemptRow>();
+    if (!journeyAttempt) return NextResponse.json({ error: "Journey not found" }, { status: 404 });
+
+    const stepsRes = await env.DB
+        .prepare(`SELECT id, journeyAttemptId, sequence, name, description, type, lat, lng, radiusMeters, status FROM JourneyStep WHERE journeyAttemptId = ? ORDER BY sequence`)
+        .bind(id)
+        .all<JourneyStepRow>();
+    const steps = stepsRes.results;
+
+    // Journey already ended (or otherwise not active) — nothing left to advance.
+    if (journeyAttempt.status !== "started") {
+        return NextResponse.json({ journeyAttempt, steps });
+    }
+
+    const target = steps.find((step) => step.id === stepId);
+    if (!target) return NextResponse.json({ error: "Journey step not found" }, { status: 404 });
+
+    // Already caught up by an earlier call, or a re-firing geofence region — no-op.
+    if (target.status === "done") {
+        return NextResponse.json({ journeyAttempt, steps });
+    }
+
+    if (target.lat == null || target.lng == null) {
+        return NextResponse.json({ error: "This step isn't location-based" }, { status: 400 });
+    }
+
+    const distance = haversine({ lat: target.lat, lng: target.lng }, { lat, lng });
+    const tolerance = target.radiusMeters ?? DEFAULT_GEOFENCE_TOLERANCE_METERS;
+    if (distance > tolerance) {
+        return NextResponse.json({ error: "Too far from this step's location" }, { status: 400 });
+    }
+
+    // Walk every not-yet-done step up to and including the target: the target itself is
+    // proven by its own geofence, optional steps in between are forgiven, and any
+    // required step in between blocks currentStepSequence from moving past it.
+    const newlyDone: JourneyStepRow[] = [];
+    for (const step of steps) {
+        if (step.sequence > target.sequence || step.status === "done") continue;
+        if (step.id === target.id || step.type.toLowerCase() === "optional") {
+            step.status = "done";
+            newlyDone.push(step);
+        }
+    }
+
+    const firstPending = steps.find((step) => step.status !== "done");
+    const newCurrentStepSequence = firstPending ? firstPending.sequence - 1 : steps[steps.length - 1].sequence;
+    const justCompleted = !firstPending;
+
+    const now = new Date().toISOString();
+    journeyAttempt.currentStepSequence = newCurrentStepSequence;
+    if (justCompleted) {
+        journeyAttempt.status = "completed";
+        journeyAttempt.endedAt = now;
+    }
+
+    const statements = [
+        ...newlyDone.map((step) => env.DB.prepare(`UPDATE JourneyStep SET status = 'done' WHERE id = ?`).bind(step.id)),
+        env.DB
+            .prepare(`UPDATE JourneyAttempt SET currentStepSequence = ?, status = ?, endedAt = ? WHERE id = ?`)
+            .bind(newCurrentStepSequence, journeyAttempt.status, journeyAttempt.endedAt, id),
+    ];
+    if (justCompleted) {
+        statements.push(
+            env.DB
+                .prepare(`UPDATE UserQuest SET status = 'completed', completedAt = ? WHERE id = ? AND status != 'completed'`)
+                .bind(now, journeyAttempt.userQuestId)
+        );
+    }
+
+    await env.DB.batch(statements);
+
+    return NextResponse.json({ journeyAttempt, steps });
+}

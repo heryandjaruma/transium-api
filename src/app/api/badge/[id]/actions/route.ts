@@ -7,7 +7,7 @@ type BadgeActionStepRow = {
     badgeId: string;
     actionId: string;
     actionName: string;
-    actionType: string;
+    type: string;
     sequence: number;
     lat: number | null;
     lng: number | null;
@@ -15,17 +15,18 @@ type BadgeActionStepRow = {
 };
 
 const SELECT_STEP = `
-    SELECT ba.id, ba.badgeId, ba.actionId, ba.sequence, ba.lat, ba.lng, ba.instruction,
-           ad.name as actionName, ad.type as actionType
+    SELECT ba.id, ba.badgeId, ba.actionId, ba.sequence, ba.lat, ba.lng, ba.instruction, ba.type,
+           ad.name as actionName
     FROM BadgeAction ba
     JOIN ActionDefinition ad ON ad.id = ba.actionId
 `;
 
 function parseStepBody(body: unknown) {
-    const { actionId, sequence, lat, lng, instruction } = (body ?? {}) as Record<string, unknown>;
+    const { actionId, sequence, type, lat, lng, instruction } = (body ?? {}) as Record<string, unknown>;
 
     if (typeof actionId !== "string" || !actionId.trim()) return { error: "Invalid actionId" } as const;
     if (typeof sequence !== "number" || !Number.isFinite(sequence)) return { error: "Invalid sequence" } as const;
+    if (type !== "required" && type !== "optional") return { error: "Invalid type" } as const;
     if (lat !== null && lat !== undefined && typeof lat !== "number") return { error: "Invalid lat" } as const;
     if (lng !== null && lng !== undefined && typeof lng !== "number") return { error: "Invalid lng" } as const;
     if (instruction !== null && instruction !== undefined && typeof instruction !== "string") {
@@ -35,6 +36,7 @@ function parseStepBody(body: unknown) {
     return {
         actionId: actionId.trim(),
         sequence,
+        type,
         lat: typeof lat === "number" ? lat : null,
         lng: typeof lng === "number" ? lng : null,
         instruction: typeof instruction === "string" && instruction.trim() ? instruction.trim() : null,
@@ -53,7 +55,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ steps: res.results });
 }
 
-/** Adds a step to a badge. Body: `{ actionId, sequence, lat?, lng?, instruction? }`. */
+/** Adds a step to a badge. Body: `{ actionId, sequence, type, lat?, lng?, instruction? }` — `type` is `"required"` or `"optional"`. */
 export async function POST(request: NextRequest, { params }: Params) {
     const { id } = await params;
     const body = await request.json().catch(() => null);
@@ -76,8 +78,8 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const stepId = crypto.randomUUID();
     await env.DB
-        .prepare(`INSERT INTO BadgeAction (id, badgeId, actionId, sequence, lat, lng, instruction) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-        .bind(stepId, id, parsed.actionId, parsed.sequence, parsed.lat, parsed.lng, parsed.instruction)
+        .prepare(`INSERT INTO BadgeAction (id, badgeId, actionId, sequence, type, lat, lng, instruction) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(stepId, id, parsed.actionId, parsed.sequence, parsed.type, parsed.lat, parsed.lng, parsed.instruction)
         .run();
 
     const step = await env.DB.prepare(`${SELECT_STEP} WHERE ba.id = ?`).bind(stepId).first<BadgeActionStepRow>();

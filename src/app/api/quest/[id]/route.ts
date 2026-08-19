@@ -11,7 +11,7 @@ type StepRow = {
     badgeId: string;
     actionId: string;
     actionName: string;
-    actionType: string;
+    type: string;
     sequence: number;
     lat: number | null;
     lng: number | null;
@@ -65,8 +65,8 @@ async function getQuestDetail(db: D1Database, id: string) {
         const placeholders = badgeIds.map(() => "?").join(", ");
         const stepsRes = await db
             .prepare(
-                `SELECT ba.id, ba.badgeId, ba.actionId, ba.sequence, ba.lat, ba.lng, ba.instruction,
-                        ad.name as actionName, ad.type as actionType
+                `SELECT ba.id, ba.badgeId, ba.actionId, ba.sequence, ba.lat, ba.lng, ba.instruction, ba.type,
+                        ad.name as actionName
                  FROM BadgeAction ba
                  JOIN ActionDefinition ad ON ad.id = ba.actionId
                  WHERE ba.badgeId IN (${placeholders})
