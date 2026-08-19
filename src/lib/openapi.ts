@@ -940,6 +940,97 @@ export const openApiSpec = {
                 },
             },
         },
+        "/private/journey/{id}/advance": {
+            post: {
+                tags: ["Journey"],
+                summary: "Advance a journey attempt from a geofence trigger",
+                description:
+                    "Body: `{ stepId, lat, lng }` — the JourneyStep whose geofence just fired, plus the " +
+                    "device's current position, checked against that step's own lat/lng (within ~150m) so " +
+                    "arrival can't be spoofed.\n\n" +
+                    "The caller may be geofenced into a step ahead of `currentStepSequence` (e.g. they walked " +
+                    "past an optional photo stop without opening the app). Any `type: \"optional\"` step " +
+                    "skipped over is auto-marked `status: \"done\"`; any `type: \"required\"` step skipped " +
+                    "over is left `\"waiting\"` and caps how far `currentStepSequence` moves, since a required " +
+                    "step's completion can't be inferred from a later step's geofence alone. When every step " +
+                    "ends up `\"done\"`, the JourneyAttempt is marked `status: \"completed\"` and the parent " +
+                    "UserQuest moves to `status: \"completed\"` too.\n\n" +
+                    "Idempotent no-op (200, unchanged) when the attempt isn't `status: \"started\"` or the " +
+                    "target step is already `\"done\"` — both expected from geofence regions re-firing, or a " +
+                    "previous call's catch-up having already covered this step.",
+                security: [{ bearerAuth: [] }],
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["stepId", "lat", "lng"],
+                                properties: {
+                                    stepId: { type: "string", format: "uuid" },
+                                    lat: { type: "number" },
+                                    lng: { type: "number" },
+                                },
+                            },
+                            example: { stepId: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f", lat: -6.914744, lng: 107.60981 },
+                        },
+                    },
+                },
+                responses: {
+                    "200": {
+                        description: "Journey attempt advanced (or left unchanged, if there was nothing to do).",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["journeyAttempt", "steps"],
+                                    properties: {
+                                        journeyAttempt: { $ref: "#/components/schemas/JourneyAttempt" },
+                                        steps: { type: "array", items: { $ref: "#/components/schemas/JourneyAttemptStep" } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Missing/invalid `stepId` or `lat`/`lng`, the step has no lat/lng, or the submitted position is too far from it.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                examples: {
+                                    invalidStep: { value: { error: "Invalid stepId" } },
+                                    invalidLatLng: { value: { error: "Invalid lat/lng" } },
+                                    notLocationBased: { value: { error: "This step isn't location-based" } },
+                                    tooFar: { value: { error: "Too far from this step's location" } },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No journey attempt with this id belonging to the caller, or no such step on it.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                examples: {
+                                    noAttempt: { value: { error: "Journey not found" } },
+                                    noStep: { value: { error: "Journey step not found" } },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
         "/private/journey/media": {
             post: {
                 tags: ["Journey"],
