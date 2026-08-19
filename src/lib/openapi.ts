@@ -814,17 +814,29 @@ export const openApiSpec = {
         },
         "/journey/real": {
             get: {
-                summary: "Build the real, walkable route for a quest",
+                summary: "Build the real, walkable journey for a quest from wherever the caller is",
                 description:
-                    "Builds the quest's actual route: the ordered checkpoints across its attached badges' " +
+                    "Builds the quest's actual route, starting from the caller's own position rather than the " +
+                    "quest's own first step. The leg from `origin` to the quest's first located waypoint is " +
+                    "routed exactly like /journey/overview — walking and/or transit, searched under both cost " +
+                    "profiles, since the caller could be anywhere relative to the quest. Every leg after that " +
+                    "is the quest's own fixed route: its ordered checkpoints across all attached badges' " +
                     "BadgeActions that carry a lat/lng (in badge-attachment then step-sequence order — the same " +
-                    "grouping GET /quest/{id} and POST /private/journey/go use), connected leg by leg with a " +
-                    "real walking route from Apple Maps.\n\n" +
-                    "Unlike /journey/overview (which routes between two arbitrary points and may use transit), " +
-                    "a quest's route is fixed by its own waypoints and is always walked start to finish, so the " +
-                    "response is a single result rather than the lessWalking/lessTransit envelope — `segments` " +
-                    "only ever contains `walk` entries.",
+                    "grouping GET /quest/{id} and POST /private/journey/go use), connected with real walking " +
+                    "routes from Apple Maps all the way to the quest's last checkpoint.\n\n" +
+                    "The response is the same envelope /journey/overview returns, tagged with `questId`, " +
+                    "except `destination` on every journey is always the quest's last checkpoint rather than " +
+                    "something the caller passed in.\n\n" +
+                    alternativesEnvelopeDescription,
                 parameters: [
+                    {
+                        name: "origin",
+                        in: "query",
+                        required: true,
+                        description: "Caller's current position, as `lat,lng`.",
+                        schema: { type: "string" },
+                        example: "-8.6705,115.2126",
+                    },
                     {
                         name: "questId",
                         in: "query",
@@ -835,16 +847,28 @@ export const openApiSpec = {
                 ],
                 responses: {
                     "200": {
-                        description: "Route built.",
+                        description: "Journey built.",
                         content: {
                             "application/json": {
                                 schema: {
                                     allOf: [
-                                        { $ref: "#/components/schemas/JourneyResult" },
                                         {
                                             type: "object",
-                                            required: ["questId"],
-                                            properties: { questId: { type: "string", format: "uuid" } },
+                                            required: ["questId", "alternativesAvailable", "best"],
+                                            properties: {
+                                                questId: { type: "string", format: "uuid" },
+                                                alternativesAvailable: {
+                                                    type: "boolean",
+                                                    description:
+                                                        "true when lessWalking and lessTransit found genuinely different " +
+                                                        "origin-to-first-waypoint legs (both are then included alongside " +
+                                                        "best); false when they agree or only one exists (only best is " +
+                                                        "included).",
+                                                },
+                                                best: { $ref: "#/components/schemas/JourneyResult" },
+                                                lessWalking: { $ref: "#/components/schemas/JourneyResult" },
+                                                lessTransit: { $ref: "#/components/schemas/JourneyResult" },
+                                            },
                                         },
                                     ],
                                 },
@@ -852,7 +876,7 @@ export const openApiSpec = {
                         },
                     },
                     "400": {
-                        description: "Missing/invalid `questId`, or the quest has fewer than two located steps to walk between.",
+                        description: "Missing/invalid `origin`/`questId`, or the quest has no located steps to route to.",
                         content: {
                             "application/json": {
                                 schema: {
@@ -861,13 +885,13 @@ export const openApiSpec = {
                                 },
                                 examples: {
                                     invalid: { value: { error: "Invalid arguments" } },
-                                    tooFewWaypoints: { value: { error: "This quest doesn't have enough located steps to walk a route" } },
+                                    noWaypoints: { value: { error: "This quest has no located steps to route to" } },
                                 },
                             },
                         },
                     },
                     "404": {
-                        description: "Quest not found, or Apple Maps returned no walking directions for a required leg.",
+                        description: "Quest not found, no journey could be found to the first waypoint, or Apple Maps returned no walking directions for a required leg.",
                         content: {
                             "application/json": {
                                 schema: {
