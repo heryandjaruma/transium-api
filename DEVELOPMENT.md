@@ -81,6 +81,14 @@ Then do request for the private endpoint with the debug session like above.
 Header: Authorization: Bearer debug-token-123
 ```
 
+### Quest endpoints
+
+| Method | Path                  | Purpose                                                                 |
+| ------ | ---------------------- | ------------------------------------------------------------------------ |
+| GET    | `/api/private/quest`   | List quests the caller hasn't completed yet — the "what can I do now" list. Query: `label?`. |
+
+Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Quest" tag.
+
 ### Journey endpoints
 
 | Method | Path                          | Purpose                                                                        |
@@ -88,10 +96,18 @@ Header: Authorization: Bearer debug-token-123
 | POST   | `/api/private/journey/go`      | Start a journey attempt for a quest. Body: `{ questId }`.                       |
 | GET    | `/api/private/journey`         | List the caller's journey attempts. Query: `status?`.                          |
 | GET    | `/api/private/journey/{id}`    | Get a single journey attempt, its steps, its summary, and its walked path (all empty/null until ended). |
-| POST   | `/api/private/journey/{id}/complete` | Explicitly complete a journey attempt once every step is `status: "done"`. Awards the quest's `xp` to the caller's Profile.level. |
+| POST   | `/api/private/journey/{id}/complete` | Explicitly complete a journey attempt once every step is `status: "done"`. Awards the quest's `xp` to the caller's Profile.level and a UserBadge for each of the quest's badges the caller doesn't already have. |
 | POST   | `/api/private/journey/media`   | Upload a photo for a journey step. Form fields: `journeyStepId`, `file`.       |
 
 Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Journey" tag.
+
+### Badge endpoints
+
+| Method | Path                  | Purpose                                                                 |
+| ------ | ---------------------- | ------------------------------------------------------------------------ |
+| GET    | `/api/private/badge`   | List the caller's earned badges, most recently earned first.           |
+
+Badges are earned automatically by `POST /private/journey/{id}/complete` — there's no endpoint to earn one directly. Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Badge" tag.
 
 ### Profile endpoints
 

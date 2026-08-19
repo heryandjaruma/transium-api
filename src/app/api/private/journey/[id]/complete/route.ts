@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getAuth } from "@/lib/auth";
 import { getOrCreateProfile, SELECT_PROFILE, ProfileRow } from "@/lib/profile";
+import { calculateJourneySavings } from "@/lib/savings";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -41,6 +42,9 @@ type JourneySummaryRow = {
     calorie: number;
     startPoint: string;
     finishPoint: string;
+    fuelCostSavedIdr: number;
+    rideHailingMotorcycleSavedIdr: number;
+    rideHailingCarSavedIdr: number;
 };
 
 type JourneyPathPointRow = {
@@ -51,6 +55,8 @@ type JourneyPathPointRow = {
     lng: number;
     recordedAt: string | null;
 };
+
+type QuestBadgeAwardRow = { badgeId: string; badgeName: string; badgeCategory: string; badgeType: string; badgeImageUrl: string | null };
 
 type PathPointInput = { lat: number; lng: number; recordedAt: string | null };
 
@@ -114,15 +120,19 @@ function parseCompleteBody(body: unknown) {
  * for the walked route, stored separately from the summary.
  *
  * Marks the JourneyAttempt `status: "completed"` with `endedAt`, the parent UserQuest
- * `status: "completed"`, writes JourneySummary + JourneyPathPoint rows, and awards the
- * quest's `xp` to the caller's Profile.level (creating the Profile first if this is
- * their first journey).
+ * `status: "completed"`, writes JourneySummary + JourneyPathPoint rows — the summary's
+ * `fuelCostSavedIdr`/`rideHailingMotorcycleSavedIdr`/`rideHailingCarSavedIdr` are derived
+ * from `distanceMeters` (see `calculateJourneySavings` in `@/lib/savings`), not supplied
+ * by the caller — awards the quest's `xp` to the caller's Profile.level (creating the
+ * Profile first if this is their first journey), and creates a UserBadge for every Badge
+ * attached to the quest (via QuestBadge) the caller doesn't already have — earning the
+ * same badge again via a different quest is a no-op, not a duplicate.
  *
- * Idempotent no-op (200, returning the existing summary/path unchanged, `xpAwarded: 0`)
- * if the attempt is already `status: "completed"` — xp is only ever awarded once, on
- * the call that actually transitions the attempt. Fails with 400 if any step is still
- * `"waiting"` (the body isn't even parsed in that case), or 409 if the attempt isn't
- * active.
+ * Idempotent no-op (200, returning the existing summary/path unchanged, `xpAwarded: 0`,
+ * `badgesAwarded: []`) if the attempt is already `status: "completed"` — xp/badges are
+ * only ever awarded once, on the call that actually transitions the attempt. Fails with
+ * 400 if any step is still `"waiting"` (the body isn't even parsed in that case), or 409
+ * if the attempt isn't active.
  */
 export async function POST(request: NextRequest, { params }: Params) {
     const { id } = await params;
@@ -153,7 +163,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     // Already finished — nothing to do.
     if (journeyAttempt.status === "completed") {
         const summary = await env.DB
-            .prepare(`SELECT id, journeyAttemptId, stepsTaken, distanceMeters, calorie, startPoint, finishPoint FROM JourneySummary WHERE journeyAttemptId = ?`)
+            .prepare(
+                `SELECT id, journeyAttemptId, stepsTaken, distanceMeters, calorie, startPoint, finishPoint,
+                        fuelCostSavedIdr, rideHailingMotorcycleSavedIdr, rideHailingCarSavedIdr
+                 FROM JourneySummary WHERE journeyAttemptId = ?`
+            )
             .bind(id)
             .first<JourneySummaryRow>();
         const pathRes = await env.DB
@@ -168,6 +182,7 @@ export async function POST(request: NextRequest, { params }: Params) {
             summary: summary ?? null,
             path: pathRes.results,
             xpAwarded: 0,
+            badgesAwarded: [],
             profile: existingProfile ?? null,
         });
     }
@@ -191,6 +206,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     journeyAttempt.endedAt = now;
     journeyAttempt.currentStepSequence = steps[steps.length - 1].sequence;
 
+    const savings = calculateJourneySavings(parsed.distanceMeters);
+
     const summary: JourneySummaryRow = {
         id: crypto.randomUUID(),
         journeyAttemptId: id,
@@ -199,6 +216,9 @@ export async function POST(request: NextRequest, { params }: Params) {
         calorie: parsed.calorie,
         startPoint: parsed.startPoint,
         finishPoint: parsed.finishPoint,
+        fuelCostSavedIdr: savings.fuelCostSavedIdr,
+        rideHailingMotorcycleSavedIdr: savings.rideHailingMotorcycleSavedIdr,
+        rideHailingCarSavedIdr: savings.rideHailingCarSavedIdr,
     };
 
     const path: JourneyPathPointRow[] = parsed.path.map((point, index) => ({
@@ -212,6 +232,28 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     await getOrCreateProfile(env.DB, session.user.id, session.user.name);
 
+    const questBadgesRes = await env.DB
+        .prepare(
+            `SELECT b.id as badgeId, b.name as badgeName, b.category as badgeCategory, b.type as badgeType, b.imageUrl as badgeImageUrl
+             FROM QuestBadge qb
+             JOIN Badge b ON b.id = qb.badgeId
+             WHERE qb.questId = ?`
+        )
+        .bind(journeyAttempt.questId)
+        .all<QuestBadgeAwardRow>();
+
+    let newBadges: (QuestBadgeAwardRow & { id: string })[] = [];
+    if (questBadgesRes.results.length > 0) {
+        const badgeIds = questBadgesRes.results.map((b) => b.badgeId);
+        const placeholders = badgeIds.map(() => "?").join(", ");
+        const ownedRes = await env.DB
+            .prepare(`SELECT badgeId FROM UserBadge WHERE userId = ? AND badgeId IN (${placeholders})`)
+            .bind(session.user.id, ...badgeIds)
+            .all<{ badgeId: string }>();
+        const owned = new Set(ownedRes.results.map((r) => r.badgeId));
+        newBadges = questBadgesRes.results.filter((b) => !owned.has(b.badgeId)).map((b) => ({ ...b, id: crypto.randomUUID() }));
+    }
+
     await env.DB.batch([
         env.DB
             .prepare(`UPDATE JourneyAttempt SET status = 'completed', endedAt = ?, currentStepSequence = ? WHERE id = ?`)
@@ -221,20 +263,38 @@ export async function POST(request: NextRequest, { params }: Params) {
             .bind(now, journeyAttempt.userQuestId),
         env.DB
             .prepare(
-                `INSERT INTO JourneySummary (id, journeyAttemptId, stepsTaken, distanceMeters, calorie, startPoint, finishPoint)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO JourneySummary (id, journeyAttemptId, stepsTaken, distanceMeters, calorie, startPoint, finishPoint,
+                                              fuelCostSavedIdr, rideHailingMotorcycleSavedIdr, rideHailingCarSavedIdr)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
-            .bind(summary.id, summary.journeyAttemptId, summary.stepsTaken, summary.distanceMeters, summary.calorie, summary.startPoint, summary.finishPoint),
+            .bind(
+                summary.id,
+                summary.journeyAttemptId,
+                summary.stepsTaken,
+                summary.distanceMeters,
+                summary.calorie,
+                summary.startPoint,
+                summary.finishPoint,
+                summary.fuelCostSavedIdr,
+                summary.rideHailingMotorcycleSavedIdr,
+                summary.rideHailingCarSavedIdr
+            ),
         ...path.map((point) =>
             env.DB
                 .prepare(`INSERT INTO JourneyPathPoint (id, journeyAttemptId, sequence, lat, lng, recordedAt) VALUES (?, ?, ?, ?, ?, ?)`)
                 .bind(point.id, point.journeyAttemptId, point.sequence, point.lat, point.lng, point.recordedAt)
         ),
         env.DB.prepare(`UPDATE Profile SET level = level + ? WHERE userId = ?`).bind(journeyAttempt.questXp, session.user.id),
+        ...newBadges.map((badge) =>
+            env.DB
+                .prepare(`INSERT INTO UserBadge (id, userId, badgeId, journeyAttemptId, earnedAt) VALUES (?, ?, ?, ?, ?)`)
+                .bind(badge.id, session.user.id, badge.badgeId, id, now)
+        ),
     ]);
 
     const { questXp, ...completedAttempt } = journeyAttempt;
     const profile = await env.DB.prepare(SELECT_PROFILE).bind(session.user.id).first<ProfileRow>();
+    const badgesAwarded = newBadges.map((badge) => ({ ...badge, earnedAt: now, questId: journeyAttempt.questId, questName: journeyAttempt.questName }));
 
-    return NextResponse.json({ journeyAttempt: completedAttempt, steps, summary, path, xpAwarded: questXp, profile });
+    return NextResponse.json({ journeyAttempt: completedAttempt, steps, summary, path, xpAwarded: questXp, badgesAwarded, profile });
 }

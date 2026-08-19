@@ -38,6 +38,9 @@ type JourneySummaryRow = {
     calorie: number;
     startPoint: string;
     finishPoint: string;
+    fuelCostSavedIdr: number;
+    rideHailingMotorcycleSavedIdr: number;
+    rideHailingCarSavedIdr: number;
 };
 
 type JourneyPathPointRow = {
@@ -77,7 +80,11 @@ export async function GET(request: NextRequest, { params }: Params) {
         .all<JourneyStepRow>();
 
     const summary = await env.DB
-        .prepare(`SELECT id, journeyAttemptId, stepsTaken, distanceMeters, calorie, startPoint, finishPoint FROM JourneySummary WHERE journeyAttemptId = ?`)
+        .prepare(
+            `SELECT id, journeyAttemptId, stepsTaken, distanceMeters, calorie, startPoint, finishPoint,
+                    fuelCostSavedIdr, rideHailingMotorcycleSavedIdr, rideHailingCarSavedIdr
+             FROM JourneySummary WHERE journeyAttemptId = ?`
+        )
         .bind(id)
         .first<JourneySummaryRow>();
 
