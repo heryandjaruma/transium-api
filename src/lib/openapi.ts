@@ -381,12 +381,17 @@ export const openApiSpec = {
             },
             MediaAsset: {
                 type: "object",
-                required: ["id", "createdAt", "type", "url"],
+                required: ["id", "createdAt", "type", "url", "alt", "copyright"],
                 properties: {
                     id: { type: "string", format: "uuid" },
                     createdAt: { type: "string", format: "date-time" },
                     type: { type: "string", description: "MIME type, e.g. \"image/jpeg\"." },
                     url: { type: "string" },
+                    alt: { type: ["string", "null"], description: "Accessibility alt text. Null if unset." },
+                    copyright: {
+                        type: ["string", "null"],
+                        description: "Copyright/attribution notice, e.g. for quest thumbnails sourced from a photographer. Null if unset.",
+                    },
                 },
             },
             GalleryItem: {

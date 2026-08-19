@@ -1,0 +1,4 @@
+-- Migration number: 0014 	 2026-08-19T00:00:00.000Z
+
+ALTER TABLE Media ADD COLUMN alt TEXT;
+ALTER TABLE Media ADD COLUMN copyright TEXT;
