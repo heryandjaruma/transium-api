@@ -48,6 +48,11 @@ type JourneyStepRow = {
  * over is left `"waiting"` and caps how far `currentStepSequence` moves, since a required
  * step's completion can't be inferred from a later step's geofence alone.
  *
+ * Never finishes the attempt itself, even once every step ends up `"done"` — `status`
+ * stays `"started"` and the parent UserQuest is untouched. POST .../complete is the only
+ * endpoint that actually finalizes an attempt (and awards xp/badges), so the client is
+ * expected to call it once it observes every step done here.
+ *
  * Idempotent no-op (200, unchanged) when the attempt isn't `status: "started"` or the
  * target step is already `"done"` — both expected from geofence regions re-firing, or a
  * previous call's catch-up having already covered this step.
@@ -125,28 +130,19 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const firstPending = steps.find((step) => step.status !== "done");
     const newCurrentStepSequence = firstPending ? firstPending.sequence - 1 : steps[steps.length - 1].sequence;
-    const justCompleted = !firstPending;
 
-    const now = new Date().toISOString();
     journeyAttempt.currentStepSequence = newCurrentStepSequence;
-    if (justCompleted) {
-        journeyAttempt.status = "completed";
-        journeyAttempt.endedAt = now;
-    }
 
+    // Deliberately doesn't touch `status`/`endedAt` even once every step is done: this
+    // endpoint only proves arrival, it never awards anything. POST .../complete is the
+    // sole place an attempt (and its parent UserQuest) actually finishes — it's also
+    // where xp/badges get awarded and the device's final stats/path get stored, so
+    // finishing the attempt here too would make that award logic unreachable (the client
+    // would find `status` already "completed" and get a no-op with zero xp/badges).
     const statements = [
         ...newlyDone.map((step) => env.DB.prepare(`UPDATE JourneyStep SET status = 'done' WHERE id = ?`).bind(step.id)),
-        env.DB
-            .prepare(`UPDATE JourneyAttempt SET currentStepSequence = ?, status = ?, endedAt = ? WHERE id = ?`)
-            .bind(newCurrentStepSequence, journeyAttempt.status, journeyAttempt.endedAt, id),
+        env.DB.prepare(`UPDATE JourneyAttempt SET currentStepSequence = ? WHERE id = ?`).bind(newCurrentStepSequence, id),
     ];
-    if (justCompleted) {
-        statements.push(
-            env.DB
-                .prepare(`UPDATE UserQuest SET status = 'completed', completedAt = ? WHERE id = ? AND status != 'completed'`)
-                .bind(now, journeyAttempt.userQuestId)
-        );
-    }
 
     await env.DB.batch(statements);
 

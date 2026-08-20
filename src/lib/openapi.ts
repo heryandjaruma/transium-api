@@ -1531,9 +1531,11 @@ export const openApiSpec = {
                     "past an optional photo stop without opening the app). Any `type: \"optional\"` step " +
                     "skipped over is auto-marked `status: \"done\"`; any `type: \"required\"` step skipped " +
                     "over is left `\"waiting\"` and caps how far `currentStepSequence` moves, since a required " +
-                    "step's completion can't be inferred from a later step's geofence alone. When every step " +
-                    "ends up `\"done\"`, the JourneyAttempt is marked `status: \"completed\"` and the parent " +
-                    "UserQuest moves to `status: \"completed\"` too.\n\n" +
+                    "step's completion can't be inferred from a later step's geofence alone.\n\n" +
+                    "Never finishes the attempt itself, even once every step ends up `\"done\"` — `status` " +
+                    "stays `\"started\"` and the parent UserQuest is untouched. POST .../complete is the only " +
+                    "endpoint that actually finalizes an attempt and awards xp/badges, so the client is " +
+                    "expected to call it once it observes every step done here.\n\n" +
                     "Idempotent no-op (200, unchanged) when the attempt isn't `status: \"started\"` or the " +
                     "target step is already `\"done\"` — both expected from geofence regions re-firing, or a " +
                     "previous call's catch-up having already covered this step.",
