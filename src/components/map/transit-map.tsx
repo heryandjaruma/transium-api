@@ -168,6 +168,7 @@ function segmentStopPoints(segment: JourneySegment): { stopId: string; lat: numb
     if (segment.type === "bus") {
         return segment.stops.map((stop) => ({ stopId: stop.stopId, lat: stop.lat, lng: stop.lng, name: stop.name }))
     }
+    if (segment.type === "mission") return []
     return [segment.from, segment.to]
 }
 
@@ -252,14 +253,16 @@ export function TransitMap() {
             const source = map.getSource("active-route") as GeoJSONSource | undefined
             source?.setData({
                 type: "FeatureCollection",
-                features: segments.map((seg) => ({
-                    type: "Feature",
-                    geometry: { type: "LineString", coordinates: seg.geometry },
-                    properties: {
-                        kind: seg.type,
-                        color: seg.type === "bus" ? seg.routeColor ?? "#1a1a1a" : undefined,
-                    },
-                })),
+                features: segments
+                    .filter((seg) => seg.type !== "mission")
+                    .map((seg) => ({
+                        type: "Feature",
+                        geometry: { type: "LineString", coordinates: seg.geometry },
+                        properties: {
+                            kind: seg.type,
+                            color: seg.type === "bus" ? seg.routeColor ?? "#1a1a1a" : undefined,
+                        },
+                    })),
             })
         }
 
@@ -267,14 +270,16 @@ export function TransitMap() {
             const source = map.getSource("active-route-arrow-points") as GeoJSONSource | undefined
             source?.setData({
                 type: "FeatureCollection",
-                features: segments.flatMap((seg) => {
-                    const coords = seg.geometry
-                    return sampleArrowAnchors(coords, spacingForSegment(coords)).map((anchor) => ({
-                        type: "Feature" as const,
-                        geometry: { type: "Point" as const, coordinates: anchor.point },
-                        properties: { bearing: anchor.bearing },
-                    }))
-                }),
+                features: segments
+                    .filter((seg) => seg.type !== "mission")
+                    .flatMap((seg) => {
+                        const coords = seg.geometry
+                        return sampleArrowAnchors(coords, spacingForSegment(coords)).map((anchor) => ({
+                            type: "Feature" as const,
+                            geometry: { type: "Point" as const, coordinates: anchor.point },
+                            properties: { bearing: anchor.bearing },
+                        }))
+                    }),
             })
         }
 

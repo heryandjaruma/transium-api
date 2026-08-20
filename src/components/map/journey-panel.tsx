@@ -37,6 +37,20 @@ function SegmentRow({ segment }: { segment: JourneySegment }) {
         )
     }
 
+    if (segment.type === "mission") {
+        return (
+            <li className="flex gap-3 py-3">
+                <span className="mt-0.5 text-lg" aria-hidden>
+                    🎯
+                </span>
+                <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{segment.instructions}</p>
+                    <p className="text-xs text-muted-foreground">Mission</p>
+                </div>
+            </li>
+        )
+    }
+
     const intermediateStops = Math.max(segment.stops.length - 2, 0)
 
     return (
