@@ -3,14 +3,6 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getAuth } from "@/lib/auth";
 import { USER_JOURNEY_MEDIA_PREFIX } from "@/lib/media-storage";
 
-const USER_JOURNEY_MEDIA_SUBQUERY = `
-    SELECT js.id
-    FROM JourneyStep js
-    JOIN JourneyAttempt ja ON ja.id = js.journeyAttemptId
-    JOIN UserQuest uq ON uq.id = ja.userQuestId
-    WHERE uq.userId = ?
-`;
-
 const USER_JOURNEY_ATTEMPT_SUBQUERY = `
     SELECT ja.id
     FROM JourneyAttempt ja
@@ -53,8 +45,7 @@ export async function DELETE(request: NextRequest) {
         .prepare(
             `SELECT jm.mediaId
              FROM JourneyMedia jm
-             JOIN JourneyStep js ON js.id = jm.journeyStepId
-             JOIN JourneyAttempt ja ON ja.id = js.journeyAttemptId
+             JOIN JourneyAttempt ja ON ja.id = jm.journeyAttemptId
              JOIN UserQuest uq ON uq.id = ja.userQuestId
              WHERE uq.userId = ?`
         )
@@ -64,7 +55,7 @@ export async function DELETE(request: NextRequest) {
 
     const statements = [
         env.DB.prepare(`DELETE FROM UserBadge WHERE userId = ?`).bind(userId),
-        env.DB.prepare(`DELETE FROM JourneyMedia WHERE journeyStepId IN (${USER_JOURNEY_MEDIA_SUBQUERY})`).bind(userId),
+        env.DB.prepare(`DELETE FROM JourneyMedia WHERE journeyAttemptId IN (${USER_JOURNEY_ATTEMPT_SUBQUERY})`).bind(userId),
         ...(mediaIds.length > 0
             ? [env.DB.prepare(`DELETE FROM Media WHERE id IN (${mediaIds.map(() => "?").join(", ")})`).bind(...mediaIds)]
             : []),

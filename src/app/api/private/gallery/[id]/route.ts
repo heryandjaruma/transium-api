@@ -7,7 +7,8 @@ type Params = { params: Promise<{ id: string }> };
 
 /**
  * Downloads a single photo from the caller's gallery. `id` is the Media id, and must
- * belong to one of the caller's own journey steps. Streams the R2 object back with
+ * belong to one of the caller's own journey attempts (either a specific step, or the
+ * attempt itself — see POST /private/journey/media). Streams the R2 object back with
  * `Content-Disposition: attachment` so it saves as a file rather than rendering inline.
  */
 export async function GET(request: NextRequest, { params }: Params) {
@@ -22,8 +23,7 @@ export async function GET(request: NextRequest, { params }: Params) {
             `SELECT m.id, m.type, m.url
              FROM Media m
              JOIN JourneyMedia jm ON jm.mediaId = m.id
-             JOIN JourneyStep js ON js.id = jm.journeyStepId
-             JOIN JourneyAttempt ja ON ja.id = js.journeyAttemptId
+             JOIN JourneyAttempt ja ON ja.id = jm.journeyAttemptId
              JOIN UserQuest uq ON uq.id = ja.userQuestId
              WHERE m.id = ? AND uq.userId = ?`
         )

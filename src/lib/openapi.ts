@@ -146,10 +146,11 @@ export const openApiSpec = {
         {
             name: "Gallery",
             description:
-                "The caller's photo gallery — every photo uploaded via `POST /private/journey/media`, across " +
-                "every journey step and journey attempt they've ever had, in one flat list. `GET /private/gallery` " +
-                "lists them; `GET /private/gallery/{id}` downloads one. All endpoints under this tag require " +
-                "`Authorization: Bearer <session-token>` and are scoped to the caller's own photos.",
+                "The caller's photo gallery — every photo uploaded via `POST /private/journey/media` (against a " +
+                "specific step, or a journey attempt directly), across every journey attempt they've ever had, " +
+                "in one flat list. `GET /private/gallery` lists them; `GET /private/gallery/{id}` downloads one. " +
+                "All endpoints under this tag require `Authorization: Bearer <session-token>` and are scoped to " +
+                "the caller's own photos.",
         },
         {
             name: "Device",
@@ -453,16 +454,21 @@ export const openApiSpec = {
                 },
             },
             GalleryItem: {
-                description: "A photo the caller uploaded to a journey step, with enough context to group/label it in a gallery view.",
+                description:
+                    "A photo the caller uploaded to a journey (either a specific step, or the attempt itself), " +
+                    "with enough context to group/label it in a gallery view.",
                 allOf: [
                     { $ref: "#/components/schemas/MediaAsset" },
                     {
                         type: "object",
                         required: ["journeyStepId", "journeyStepName", "journeyStepSequence", "journeyAttemptId", "questId", "questName"],
                         properties: {
-                            journeyStepId: { type: "string", format: "uuid" },
-                            journeyStepName: { type: "string" },
-                            journeyStepSequence: { type: "integer" },
+                            journeyStepId: {
+                                oneOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+                                description: "Null when this photo was uploaded against the journey attempt directly rather than one of its steps.",
+                            },
+                            journeyStepName: { oneOf: [{ type: "string" }, { type: "null" }] },
+                            journeyStepSequence: { oneOf: [{ type: "integer" }, { type: "null" }] },
                             journeyAttemptId: { type: "string", format: "uuid" },
                             questId: { type: "string", format: "uuid" },
                             questName: { type: "string" },
@@ -1838,11 +1844,14 @@ export const openApiSpec = {
         "/private/journey/media": {
             post: {
                 tags: ["Journey"],
-                summary: "Upload a photo for a journey step",
+                summary: "Upload a photo for a journey step or attempt",
                 description:
                     "Uploads a photo to R2 (under `media/user/<userId>/journey/<journeyAttemptId>/`) and links " +
-                    "it to a JourneyStep via JourneyMedia. `journeyAttemptId` is derived from `journeyStepId`, " +
-                    "which must belong to one of the caller's own journey attempts.",
+                    "it via JourneyMedia to exactly one of `journeyStepId` (a specific step) or " +
+                    "`journeyAttemptId` (the attempt itself, not tied to any one step — e.g. a general " +
+                    "\"document your journey\" photo, since POST /private/journey/go no longer creates a " +
+                    "dedicated \"takePicture\" step for that). Whichever one is passed must belong to one of " +
+                    "the caller's own journey attempts.",
                 security: [{ bearerAuth: [] }],
                 requestBody: {
                     required: true,
@@ -1850,9 +1859,11 @@ export const openApiSpec = {
                         "multipart/form-data": {
                             schema: {
                                 type: "object",
-                                required: ["journeyStepId", "file"],
+                                required: ["file"],
+                                description: "Exactly one of `journeyStepId`/`journeyAttemptId` must be present.",
                                 properties: {
-                                    journeyStepId: { type: "string", format: "uuid" },
+                                    journeyStepId: { type: "string", format: "uuid", description: "Attach to this specific step." },
+                                    journeyAttemptId: { type: "string", format: "uuid", description: "Attach to the attempt directly, not a step." },
                                     file: { type: "string", format: "binary", description: "image/png, image/jpeg, image/webp, or image/gif, up to 8 MB." },
                                 },
                             },
@@ -1869,12 +1880,12 @@ export const openApiSpec = {
                         },
                     },
                     "400": {
-                        description: "Missing/invalid `journeyStepId`, missing/unsupported/oversized `file`.",
+                        description: "Neither or both of `journeyStepId`/`journeyAttemptId` passed, or missing/unsupported/oversized `file`.",
                         content: {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 examples: {
-                                    missingStep: { value: { error: "Missing journeyStepId" } },
+                                    ambiguousTarget: { value: { error: "Provide exactly one of journeyStepId or journeyAttemptId" } },
                                     missingFile: { value: { error: "Missing file" } },
                                     unsupportedType: { value: { error: "Unsupported file type" } },
                                     tooLarge: { value: { error: "File too large" } },
@@ -1892,11 +1903,14 @@ export const openApiSpec = {
                         },
                     },
                     "404": {
-                        description: "No journey step with this id belonging to the caller.",
+                        description: "No journey step/attempt with the given id belonging to the caller.",
                         content: {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
-                                example: { error: "Journey step not found" },
+                                examples: {
+                                    stepNotFound: { value: { error: "Journey step not found" } },
+                                    attemptNotFound: { value: { error: "Journey attempt not found" } },
+                                },
                             },
                         },
                     },
@@ -1906,11 +1920,12 @@ export const openApiSpec = {
         "/private/gallery": {
             get: {
                 tags: ["Gallery"],
-                summary: "List every photo across the caller's journey steps",
+                summary: "List every photo across the caller's journey attempts",
                 description:
-                    "Returns every photo the caller has uploaded to any journey step, across every journey " +
-                    "attempt, most recent first. Each entry carries the quest and journey step it came from " +
-                    "so a client can group/label them without extra lookups.",
+                    "Returns every photo the caller has uploaded to any journey attempt — against a specific " +
+                    "step or the attempt directly — most recent first. Each entry carries the quest (and, when " +
+                    "step-tied, the journey step) it came from so a client can group/label them without extra " +
+                    "lookups.",
                 security: [{ bearerAuth: [] }],
                 responses: {
                     "200": {
