@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ROUTE_PROFILES } from "@/lib/path-cost";
-import { buildJourneyForProfile, buildRoutingContext, PlannedJourney, ProfileResult } from "@/lib/journey-planner";
+import { buildJourneyForProfile, buildRoutingContext, PlannedJourney, ProfileResult, RoutingContext } from "@/lib/journey-planner";
 import { summarizeSegments, stepsFromSegments, walkSegment } from "@/lib/journey-segments";
-import type { WalkSegment } from "@/lib/journey";
-import { parseMapsLang } from "@/lib/apple-maps";
+import { haversine } from "@/lib/bus-graph";
+import type { JourneySegment } from "@/lib/journey";
+import { parseMapsLang, MapsLang } from "@/lib/apple-maps";
 
 type LatLng = { lat: number; lng: number };
 type QuestBadgeRow = { badgeId: string };
@@ -62,13 +63,67 @@ async function getQuestWaypoints(db: D1Database, questId: string): Promise<Waypo
         .map((step) => ({ lat: step.lat, lng: step.lng, name: step.instruction ?? step.actionName }));
 }
 
-/** Appends the quest's own fixed walking legs onto a profile's origin→first-waypoint result. */
-function appendQuestLegs(result: ProfileResult, questLegs: WalkSegment[]): ProfileResult {
+/** Appends the quest's own fixed legs onto a profile's origin→first-waypoint result. */
+function appendQuestLegs(result: ProfileResult, questLegs: JourneySegment[]): ProfileResult {
     if (!result) return null;
     if (questLegs.length === 0) return result;
     const segments = [...result.journey.segments, ...questLegs];
     const journey: PlannedJourney = { segments, summary: summarizeSegments(segments), steps: stepsFromSegments(segments) };
     return { signature: result.signature, journey };
+}
+
+// Between-mission legs stay a plain walk below this distance — a bus is only worth
+// considering once the gap between two checkpoints starts looking like a real trip
+// rather than a short walk across the same area.
+const MIN_QUEST_LEG_TRANSIT_METERS = 1800;
+
+type QuestLegProfileResult = { signature: string; segments: JourneySegment[] };
+type QuestLegByProfile = { lessWalking: QuestLegProfileResult; lessTransit: QuestLegProfileResult };
+
+/**
+ * Builds one leg of the quest's own fixed route, between two consecutive waypoints.
+ * Below MIN_QUEST_LEG_TRANSIT_METERS this is just a walk, same as before. Past that
+ * distance it's routed the same way the origin→first-waypoint leg is — both cost
+ * profiles searched for a walk/transit combination — so a bus gets offered between
+ * missions too, not just on the way to the first one. Falls back to a plain walk if no
+ * transit route is found at all, and only fails outright if even that walk fails.
+ *
+ * Each profile's result carries its `signature` (see `buildJourneyForProfile`) so the
+ * caller can tell whether the two profiles actually diverged on this leg — not just on
+ * the origin leg — when deciding whether to offer both as alternatives.
+ */
+async function buildQuestLeg(
+    env: CloudflareEnv,
+    ctx: RoutingContext,
+    from: Waypoint,
+    to: Waypoint,
+    lang?: MapsLang
+): Promise<QuestLegByProfile | null> {
+    if (haversine(from, to) <= MIN_QUEST_LEG_TRANSIT_METERS) {
+        const walk = await walkSegment(env, from, to, lang);
+        if (!walk) return null;
+        const leg = { signature: "walk", segments: [walk] };
+        return { lessWalking: leg, lessTransit: leg };
+    }
+
+    const cache = new Map<string, Promise<PlannedJourney | null>>();
+    const [lessWalking, lessTransit] = await Promise.all([
+        buildJourneyForProfile(env, ctx, from, to, ROUTE_PROFILES.lessWalking, cache, lang),
+        buildJourneyForProfile(env, ctx, from, to, ROUTE_PROFILES.lessTransit, cache, lang),
+    ]);
+
+    if (!lessWalking && !lessTransit) {
+        const walk = await walkSegment(env, from, to, lang);
+        if (!walk) return null;
+        const leg = { signature: "walk", segments: [walk] };
+        return { lessWalking: leg, lessTransit: leg };
+    }
+    const fallback = (lessWalking ?? lessTransit)!;
+    const toLeg = (result: ProfileResult) => {
+        const r = result ?? fallback;
+        return { signature: r.signature, segments: r.journey.segments };
+    };
+    return { lessWalking: toLeg(lessWalking), lessTransit: toLeg(lessTransit) };
 }
 
 /**
@@ -124,17 +179,26 @@ export async function GET(request: NextRequest) {
     }
 
     const questLegResults = await Promise.all(
-        waypoints.slice(0, -1).map((from, i) => walkSegment(env, from, waypoints[i + 1], lang))
+        waypoints.slice(0, -1).map((from, i) => buildQuestLeg(env, ctx, from, waypoints[i + 1], lang))
     );
     if (questLegResults.some((leg) => !leg)) {
         return NextResponse.json({ error: "No route found" }, { status: 404 });
     }
-    const questLegs = questLegResults as WalkSegment[];
+    const questLegs = questLegResults as QuestLegByProfile[];
+    const lessWalkingQuestLegs = questLegs.flatMap((leg) => leg.lessWalking.segments);
+    const lessTransitQuestLegs = questLegs.flatMap((leg) => leg.lessTransit.segments);
 
-    const lessWalkingFull = appendQuestLegs(lessWalking, questLegs);
-    const lessTransitFull = appendQuestLegs(lessTransit, questLegs);
+    const lessWalkingFull = appendQuestLegs(lessWalking, lessWalkingQuestLegs);
+    const lessTransitFull = appendQuestLegs(lessTransit, lessTransitQuestLegs);
 
-    const alternativesAvailable = !!lessWalkingFull && !!lessTransitFull && lessWalkingFull.signature !== lessTransitFull.signature;
+    // Combine the origin leg's signature with every quest leg's signature so a
+    // divergence between profiles on any leg — not just the origin leg — is what
+    // decides whether the two profiles are offered as separate alternatives.
+    const combinedSignature = (originLeg: ProfileResult, legs: QuestLegProfileResult[]) =>
+        [originLeg?.signature ?? null, ...legs.map((leg) => leg.signature)].join("|");
+    const lessWalkingSignature = combinedSignature(lessWalking, questLegs.map((leg) => leg.lessWalking));
+    const lessTransitSignature = combinedSignature(lessTransit, questLegs.map((leg) => leg.lessTransit));
+    const alternativesAvailable = !!lessWalkingFull && !!lessTransitFull && lessWalkingSignature !== lessTransitSignature;
     const destination = { lat: waypoints[waypoints.length - 1].lat, lng: waypoints[waypoints.length - 1].lng };
     const toResponseJourney = (j: { journey: PlannedJourney }) => ({ origin, destination, ...j.journey });
 
