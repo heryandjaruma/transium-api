@@ -25,6 +25,7 @@ type OverviewStepRow = {
     actionName: string;
     actionDescription: string;
     type: string;
+    actionType: string;
 };
 type JourneyAttemptRow = {
     id: string;
@@ -42,12 +43,13 @@ type JourneyStepRow = {
     name: string;
     description: string;
     type: string;
+    actionType: string | null;
     lat: number | null;
     lng: number | null;
     radiusMeters: number | null;
     status: string;
 };
-type StepBlueprint = Pick<JourneyStepRow, "name" | "description" | "type" | "lat" | "lng" | "radiusMeters">;
+type StepBlueprint = Pick<JourneyStepRow, "name" | "description" | "type" | "actionType" | "lat" | "lng" | "radiusMeters">;
 
 function isPictureAction(name: string) {
     return /photo|picture/i.test(name);
@@ -60,6 +62,7 @@ function isPictureAction(name: string) {
  * (never an interpolated point that might not be walkable), spaced by actual walked
  * distance rather than step count, and skipped near any waypoint that's already a real
  * "take picture" action (name-matched — ActionDefinition has no dedicated kind field).
+ * They also carry `actionType: null` since they have no backing ActionDefinition.
  *
  * The first checkpoint always lands on the route's very first located waypoint, i.e.
  * before the quest's own first action; up to two more are added, roughly evenly spaced,
@@ -70,6 +73,7 @@ function withArtificialPhotoCheckpoints(overviewSteps: OverviewStepRow[]): StepB
         name: step.actionName,
         description: step.instruction ?? step.actionDescription,
         type: step.type,
+        actionType: step.actionType,
         lat: step.lat,
         lng: step.lng,
         radiusMeters: step.lat != null && step.lng != null ? REQUIRED_STEP_RADIUS_METERS : null,
@@ -123,6 +127,7 @@ function withArtificialPhotoCheckpoints(overviewSteps: OverviewStepRow[]): StepB
                 name: "takePicture",
                 description: "Snap a photo of your journey here.",
                 type: "optional",
+                actionType: null,
                 lat: step.lat,
                 lng: step.lng,
                 radiusMeters: ARTIFICIAL_PHOTO_RADIUS_METERS,
@@ -150,7 +155,7 @@ async function getQuestOverviewSteps(db: D1Database, questId: string): Promise<O
     const stepsRes = await db
         .prepare(
             `SELECT ba.badgeId, ba.sequence, ba.lat, ba.lng, ba.instruction, ba.type,
-                    ad.name as actionName, ad.description as actionDescription
+                    ad.name as actionName, ad.description as actionDescription, ad.type as actionType
              FROM BadgeAction ba
              JOIN ActionDefinition ad ON ad.id = ba.actionId
              WHERE ba.badgeId IN (${placeholders})
@@ -175,10 +180,13 @@ async function getQuestOverviewSteps(db: D1Database, questId: string): Promise<O
  * (`status: "started"`, `currentStepSequence: 0`) and a JourneyStep per BadgeAction in
  * the quest's overview (across all attached badges, in attachment/sequence order), each
  * carrying its action's name/description, its BadgeAction's own `type`
- * (`"required"`/`"optional"`), and lat/lng when the BadgeAction has one, initialised as
- * `status: "waiting"`. 1-3 artificial `type: "optional"` steps (`name: "takePicture"`) are
- * interleaved in — see `withArtificialPhotoCheckpoints` — so the user is prompted to
- * document their journey even when none of the quest's own actions do.
+ * (`"required"`/`"optional"`), its ActionDefinition's own `actionType` (e.g. "photo",
+ * "checkin" — the free-text kind of action, distinct from `type`'s required/optional),
+ * and lat/lng when the BadgeAction has one, initialised as `status: "waiting"`. 1-3
+ * artificial `type: "optional"` steps (`name: "takePicture"`, `actionType: null` since
+ * they have no backing ActionDefinition) are interleaved in — see
+ * `withArtificialPhotoCheckpoints` — so the user is prompted to document their journey
+ * even when none of the quest's own actions do.
  *
  * `geofences` is the subset of `steps` that has a location — everywhere the phone should
  * register a `CLCircularRegion`, each with the `radiusMeters` the server itself checks
@@ -265,6 +273,7 @@ export async function POST(request: NextRequest) {
         name: step.name,
         description: step.description,
         type: step.type,
+        actionType: step.actionType,
         lat: step.lat,
         lng: step.lng,
         radiusMeters: step.radiusMeters,
@@ -289,8 +298,8 @@ export async function POST(request: NextRequest) {
         ...steps.map((step) =>
             env.DB
                 .prepare(
-                    `INSERT INTO JourneyStep (id, journeyAttemptId, sequence, name, description, type, lat, lng, radiusMeters, status)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                    `INSERT INTO JourneyStep (id, journeyAttemptId, sequence, name, description, type, actionType, lat, lng, radiusMeters, status)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
                 )
                 .bind(
                     step.id,
@@ -299,6 +308,7 @@ export async function POST(request: NextRequest) {
                     step.name,
                     step.description,
                     step.type,
+                    step.actionType,
                     step.lat,
                     step.lng,
                     step.radiusMeters,

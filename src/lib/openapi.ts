@@ -680,7 +680,7 @@ export const openApiSpec = {
             },
             JourneyAttemptStep: {
                 type: "object",
-                required: ["id", "journeyAttemptId", "sequence", "name", "description", "type", "lat", "lng", "radiusMeters", "status"],
+                required: ["id", "journeyAttemptId", "sequence", "name", "description", "type", "actionType", "lat", "lng", "radiusMeters", "status"],
                 properties: {
                     id: { type: "string", format: "uuid" },
                     journeyAttemptId: { type: "string", format: "uuid" },
@@ -693,6 +693,13 @@ export const openApiSpec = {
                     },
                     description: { type: "string", description: "The BadgeAction's instruction, or ActionDefinition.description if unset." },
                     type: { type: "string", enum: ["required", "optional"], description: "The step's BadgeAction.type." },
+                    actionType: {
+                        oneOf: [{ type: "string" }, { type: "null" }],
+                        description:
+                            "The step's ActionDefinition.type — a free-text kind of action (e.g. \"photo\", " +
+                            "\"checkin\"), unrelated to `type`'s required/optional-ness. Null for an artificial " +
+                            "\"takePicture\" photo checkpoint, which has no backing ActionDefinition.",
+                    },
                     lat: { oneOf: [{ type: "number" }, { type: "null" }] },
                     lng: { oneOf: [{ type: "number" }, { type: "null" }] },
                     radiusMeters: {
@@ -1285,12 +1292,13 @@ export const openApiSpec = {
                     "finding or creating their UserQuest for `questId` first. Flattens every BadgeAction across " +
                     "the quest's attached badges (in badge-attachment then step-sequence order — the same " +
                     "grouping GET /quest/{id} returns) into a JourneyStep per action, each initialised " +
-                    "`status: \"waiting\"`.\n\n" +
-                    "1-3 artificial `type: \"optional\"` steps (`name: \"takePicture\"`) are interleaved in — " +
-                    "one always lands on the route's first located waypoint (before the quest's own first " +
-                    "action), with up to two more spaced out by walked distance on longer routes — so the " +
-                    "user is prompted to document their journey even when none of the quest's own actions do. " +
-                    "None are added within ~600m of an existing \"take picture\"-like action.\n\n" +
+                    "`status: \"waiting\"` and carrying `actionType` — its ActionDefinition's own `type`, e.g. " +
+                    "\"photo\"/\"checkin\" (unrelated to `type`'s required/optional-ness).\n\n" +
+                    "1-3 artificial `type: \"optional\"`, `actionType: null` steps (`name: \"takePicture\"`) are " +
+                    "interleaved in — one always lands on the route's first located waypoint (before the " +
+                    "quest's own first action), with up to two more spaced out by walked distance on longer " +
+                    "routes — so the user is prompted to document their journey even when none of the quest's " +
+                    "own actions do. None are added within ~600m of an existing \"take picture\"-like action.\n\n" +
                     "`geofences` is every located step (real or artificial) as a `{ stepId, sequence, lat, lng, " +
                     "radiusMeters }` the client should register a CLCircularRegion for — `radiusMeters` is the " +
                     "same tolerance POST .../advance itself checks the submitted position against, so a " +

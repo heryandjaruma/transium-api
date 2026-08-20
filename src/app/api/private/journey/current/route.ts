@@ -22,6 +22,7 @@ type JourneyStepRow = {
     name: string;
     description: string;
     type: string;
+    actionType: string | null;
     lat: number | null;
     lng: number | null;
     radiusMeters: number | null;
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
     }
 
     const stepsRes = await env.DB
-        .prepare(`SELECT id, journeyAttemptId, sequence, name, description, type, lat, lng, radiusMeters, status FROM JourneyStep WHERE journeyAttemptId = ? ORDER BY sequence`)
+        .prepare(`SELECT id, journeyAttemptId, sequence, name, description, type, actionType, lat, lng, radiusMeters, status FROM JourneyStep WHERE journeyAttemptId = ? ORDER BY sequence`)
         .bind(journeyAttempt.id)
         .all<JourneyStepRow>();
 
