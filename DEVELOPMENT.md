@@ -83,9 +83,11 @@ Header: Authorization: Bearer debug-token-123
 
 ### Quest endpoints
 
-| Method | Path                  | Purpose                                                                 |
-| ------ | ---------------------- | ------------------------------------------------------------------------ |
-| GET    | `/api/private/quest`   | List quests the caller hasn't completed yet — the "what can I do now" list. Query: `label?`. |
+| Method | Path                             | Purpose                                                                 |
+| ------ | --------------------------------- | ------------------------------------------------------------------------ |
+| GET    | `/api/private/quest`              | List quests the caller hasn't completed yet — the "what can I do now" list. Query: `label?`. |
+| GET    | `/api/private/kelurahan/quest`    | List quests grouped by kelurahan, each with `distanceMeters` from an `origin` ("lat,lng") query param. |
+| GET    | `/api/private/kelurahan/{id}/quest` | List one kelurahan's quests, each with `distanceMeters` from an `origin` ("lat,lng") query param. |
 
 Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Quest" tag.
 

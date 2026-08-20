@@ -71,9 +71,13 @@ export const openApiSpec = {
                 "Quests are the discoverable activities shown to end users, each carrying thumbnail media and " +
                 "one or more badges. A quest has no location of its own — it's reachable through any kelurahan " +
                 "that one of its badges is scoped to (Badge.kelurahanId), and its origin/destination coordinates " +
-                "for route preview come from its badges' step locations. `GET /quest` lists every quest; " +
-                "`GET /private/quest` (requires `Authorization: Bearer <session-token>`) narrows that down to " +
-                "the quests the signed-in caller hasn't completed yet.",
+                "for route preview come from its badges' step locations. `GET /quest`, `GET /kelurahan/quests`, " +
+                "and `GET /kelurahan/{id}/quests` list quests publicly. Their private, authenticated " +
+                "counterparts (`Authorization: Bearer <session-token>`) add caller-specific data: " +
+                "`GET /private/quest` narrows the list to quests the caller hasn't completed yet; " +
+                "`GET /private/kelurahan/quest` and `GET /private/kelurahan/{id}/quest` additionally take an " +
+                "`origin` (\"lat,lng\") query param and return each quest's `distanceMeters` — the straight-line " +
+                "distance from that origin to the quest's own origin coordinate.",
         },
         {
             name: "Trip",
@@ -562,6 +566,49 @@ export const openApiSpec = {
                     label: { type: ["string", "null"], description: "A highlight tag, e.g. \"recommended\". Null if unset. Filterable via GET /quest?label=." },
                     thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
                     badges: { type: "array", items: { $ref: "#/components/schemas/QuestBadgeEntry" } },
+                },
+            },
+            QuestWithDistance: {
+                description: "A Quest plus its straight-line distance from a caller-supplied origin, as returned by GET /private/kelurahan/quest.",
+                type: "object",
+                required: ["id", "name", "category", "description", "xp", "label", "thumbnails", "distanceMeters"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    name: { type: "string" },
+                    category: { type: "string" },
+                    description: { type: "string" },
+                    xp: { type: "integer", description: "XP awarded to the caller's Profile.level on completing a journey for this quest." },
+                    label: { type: ["string", "null"], description: "A highlight tag, e.g. \"recommended\". Null if unset." },
+                    thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
+                    distanceMeters: {
+                        type: ["number", "null"],
+                        description:
+                            "Haversine (straight-line) distance in meters from the request's `origin` query param to " +
+                            "this quest's own origin coordinate (its first badge step with a lat/lng, in attachment " +
+                            "order). Null if `origin` was missing/invalid, or the quest has no located step.",
+                    },
+                },
+            },
+            QuestWithBadgesAndDistance: {
+                description: "A Quest plus its badges and straight-line distance from a caller-supplied origin, as returned by GET /private/kelurahan/{id}/quest.",
+                type: "object",
+                required: ["id", "name", "category", "description", "xp", "label", "thumbnails", "badges", "distanceMeters"],
+                properties: {
+                    id: { type: "string", format: "uuid" },
+                    name: { type: "string" },
+                    category: { type: "string" },
+                    description: { type: "string" },
+                    xp: { type: "integer", description: "XP awarded to the caller's Profile.level on completing a journey for this quest." },
+                    label: { type: ["string", "null"], description: "A highlight tag, e.g. \"recommended\". Null if unset." },
+                    thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
+                    badges: { type: "array", items: { $ref: "#/components/schemas/QuestBadgeEntry" } },
+                    distanceMeters: {
+                        type: ["number", "null"],
+                        description:
+                            "Haversine (straight-line) distance in meters from the request's `origin` query param to " +
+                            "this quest's own origin coordinate (its first badge step with a lat/lng, in attachment " +
+                            "order). Null if `origin` was missing/invalid, or the quest has no located step.",
+                    },
                 },
             },
             Kelurahan: {
@@ -1875,6 +1922,126 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/kelurahan/quest": {
+            get: {
+                tags: ["Quest"],
+                summary: "List quests grouped by kelurahan, with distance from an origin",
+                description:
+                    "The private, authenticated counterpart to GET /kelurahan/quests: returns each kelurahan " +
+                    "that has at least one reachable quest, paired with those quests. A quest can appear under " +
+                    "more than one kelurahan if its badges span several. Each quest additionally carries " +
+                    "`distanceMeters` — see the `origin` query param.",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        name: "origin",
+                        in: "query",
+                        required: false,
+                        schema: { type: "string" },
+                        description:
+                            "\"lat,lng\" of the caller's current position. When present, each quest's `distanceMeters` " +
+                            "is the haversine distance from this point to the quest's own origin coordinate (its " +
+                            "first badge step with a lat/lng, in attachment order). Omitted or malformed → every " +
+                            "quest's `distanceMeters` is `null`.",
+                    },
+                ],
+                responses: {
+                    "200": {
+                        description: "Groups found.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["groups"],
+                                    properties: {
+                                        groups: {
+                                            type: "array",
+                                            items: {
+                                                type: "object",
+                                                required: ["kelurahan", "quests"],
+                                                properties: {
+                                                    kelurahan: { $ref: "#/components/schemas/Kelurahan" },
+                                                    quests: { type: "array", items: { $ref: "#/components/schemas/QuestWithDistance" } },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/private/kelurahan/{id}/quest": {
+            get: {
+                tags: ["Quest"],
+                summary: "List a kelurahan's quests, with distance from an origin",
+                description:
+                    "The private, authenticated counterpart to GET /kelurahan/{id}/quests: returns the quests " +
+                    "reachable in this kelurahan, each with its thumbnails, attached badges, and " +
+                    "`distanceMeters` — see the `origin` query param.",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    { name: "id", in: "path", required: true, schema: { type: "string" } },
+                    {
+                        name: "origin",
+                        in: "query",
+                        required: false,
+                        schema: { type: "string" },
+                        description:
+                            "\"lat,lng\" of the caller's current position. When present, each quest's `distanceMeters` " +
+                            "is the haversine distance from this point to the quest's own origin coordinate (its " +
+                            "first badge step with a lat/lng, in attachment order). Omitted or malformed → every " +
+                            "quest's `distanceMeters` is `null`.",
+                    },
+                ],
+                responses: {
+                    "200": {
+                        description: "Kelurahan and its quests.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["kelurahan", "quests"],
+                                    properties: {
+                                        kelurahan: { $ref: "#/components/schemas/Kelurahan" },
+                                        quests: { type: "array", items: { $ref: "#/components/schemas/QuestWithBadgesAndDistance" } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "401": {
+                        description: "Missing or invalid session.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No kelurahan with this id.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Kelurahan not found" },
                             },
                         },
                     },
