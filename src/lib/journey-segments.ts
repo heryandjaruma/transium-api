@@ -1,13 +1,14 @@
-import { getDirections } from "@/lib/apple-maps";
+import { getDirections, MapsLang } from "@/lib/apple-maps";
 import type { JourneySegment, JourneyStep, JourneySummary, LatLng, WalkSegment } from "@/lib/journey";
 
 /** Gets a walking route between two points from Apple Maps, as a `WalkSegment`. */
 export async function walkSegment(
     env: CloudflareEnv,
     from: LatLng & { name: string; stopId?: string },
-    to: LatLng & { name: string; stopId?: string }
+    to: LatLng & { name: string; stopId?: string },
+    lang?: MapsLang
 ): Promise<WalkSegment | null> {
-    const data = await getDirections(env, from, to, "Walking");
+    const data = await getDirections(env, from, to, "Walking", lang);
     const route = data.routes?.[0];
     if (!route) return null;
 

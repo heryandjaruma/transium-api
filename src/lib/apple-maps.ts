@@ -73,6 +73,16 @@ async function mapsFetch<T>(env: CloudflareEnv, path: string): Promise<T> {
 
 export type TransportType = "Automobile" | "Walking" | "Cycling";
 
+export type MapsLang = "id-ID" | "en-US";
+const DEFAULT_MAPS_LANG: MapsLang = "en-US";
+
+/** Parses a caller-supplied `lang` query value, falling back to the default for anything unrecognized. */
+export function parseMapsLang(value: string | null): MapsLang {
+  if (value === "en-US" || value === "en") return "en-US";
+  if (value === "id-ID" || value === "id") return "id-ID";
+  return DEFAULT_MAPS_LANG;
+}
+
 interface AppleLocation {
   latitude: number;
   longitude: number;
@@ -111,12 +121,14 @@ export async function getDirections(
   env: CloudflareEnv,
   origin: { lat: number; lng: number },
   destination: { lat: number; lng: number },
-  transportType: TransportType = "Automobile"
+  transportType: TransportType = "Automobile",
+  lang: MapsLang = DEFAULT_MAPS_LANG
 ): Promise<DirectionsResponse> {
   const params = new URLSearchParams({
     origin: `${origin.lat},${origin.lng}`,
     destination: `${destination.lat},${destination.lng}`,
     transportType,
+    lang,
   });
 
   return mapsFetch(env, `/v1/directions?${params}`);

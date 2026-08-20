@@ -1013,6 +1013,13 @@ export const openApiSpec = {
                         schema: { type: "string" },
                         example: "-8.7089,115.2537",
                     },
+                    {
+                        name: "lang",
+                        in: "query",
+                        required: false,
+                        description: "Language for Apple Maps' walking step `instructions`. Anything else falls back to the default.",
+                        schema: { type: "string", enum: ["id-ID", "en-US"], default: "en-US" },
+                    },
                 ],
                 responses: {
                     "200": {
@@ -1102,6 +1109,13 @@ export const openApiSpec = {
                         required: true,
                         description: "The quest to build the route for.",
                         schema: { type: "string", format: "uuid" },
+                    },
+                    {
+                        name: "lang",
+                        in: "query",
+                        required: false,
+                        description: "Language for Apple Maps' walking step `instructions`. Anything else falls back to the default.",
+                        schema: { type: "string", enum: ["id-ID", "en-US"], default: "en-US" },
                     },
                 ],
                 responses: {

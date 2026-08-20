@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { getDirections, TransportType } from "@/lib/apple-maps";
+import { getDirections, parseMapsLang, TransportType } from "@/lib/apple-maps";
 
 const TRANSPORT_TYPES: Record<string, TransportType> = {
     driving: "Automobile",
@@ -22,6 +22,7 @@ function parseLatLng(value: string | null): { lat: number; lng: number } | null 
  * Query:
  * - `origin`: "lat,lng"
  * - `destination`: "lat,lng"
+ * - `lang` (optional): "id-ID" (default) or "en-US" — language for navigation steps
  *
  * Returns the route distance, duration, geometry, and navigation steps.
  */
@@ -32,13 +33,14 @@ export async function GET(request: NextRequest) {
     const destination = parseLatLng(params.get("destination"));
     // const transportType = TRANSPORT_TYPES[params.get("transportType") ?? "walking"];
     const transportType = TRANSPORT_TYPES['walking']; // force to walk
+    const lang = parseMapsLang(params.get("lang"));
 
     if (!origin || !destination || !transportType) {
         return NextResponse.json({ error: "Invalid arguments" }, { status: 400 });
     }
 
     const { env } = getCloudflareContext();
-    const data = await getDirections(env, origin, destination, transportType);
+    const data = await getDirections(env, origin, destination, transportType, lang);
     const route = data.routes?.[0];
 
     if (!route) {

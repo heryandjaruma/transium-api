@@ -4,6 +4,7 @@ import { ROUTE_PROFILES } from "@/lib/path-cost";
 import { buildJourneyForProfile, buildRoutingContext, PlannedJourney, ProfileResult } from "@/lib/journey-planner";
 import { summarizeSegments, stepsFromSegments, walkSegment } from "@/lib/journey-segments";
 import type { WalkSegment } from "@/lib/journey";
+import { parseMapsLang } from "@/lib/apple-maps";
 
 type LatLng = { lat: number; lng: number };
 type QuestBadgeRow = { badgeId: string };
@@ -82,6 +83,7 @@ function appendQuestLegs(result: ProfileResult, questLegs: WalkSegment[]): Profi
  * Query:
  * - `origin`: caller's current position, as "lat,lng"
  * - `questId`: the quest to build the route for
+ * - `lang` (optional): "id-ID" (default) or "en-US" — language for walking step instructions
  *
  * Returns the same envelope /api/journey/overview does — `{ questId,
  * alternativesAvailable, best, lessWalking?, lessTransit? }` — except `destination` on
@@ -93,6 +95,7 @@ export async function GET(request: NextRequest) {
 
     const origin = parseLatLng(params.get("origin"));
     const questId = params.get("questId");
+    const lang = parseMapsLang(params.get("lang"));
     if (!origin || !questId) {
         return NextResponse.json({ error: "Invalid arguments" }, { status: 400 });
     }
@@ -112,8 +115,8 @@ export async function GET(request: NextRequest) {
 
     const journeyCache = new Map<string, Promise<PlannedJourney | null>>();
     const [lessWalking, lessTransit] = await Promise.all([
-        buildJourneyForProfile(env, ctx, origin, firstWaypoint, ROUTE_PROFILES.lessWalking, journeyCache),
-        buildJourneyForProfile(env, ctx, origin, firstWaypoint, ROUTE_PROFILES.lessTransit, journeyCache),
+        buildJourneyForProfile(env, ctx, origin, firstWaypoint, ROUTE_PROFILES.lessWalking, journeyCache, lang),
+        buildJourneyForProfile(env, ctx, origin, firstWaypoint, ROUTE_PROFILES.lessTransit, journeyCache, lang),
     ]);
 
     if (!lessWalking && !lessTransit) {
@@ -121,7 +124,7 @@ export async function GET(request: NextRequest) {
     }
 
     const questLegResults = await Promise.all(
-        waypoints.slice(0, -1).map((from, i) => walkSegment(env, from, waypoints[i + 1]))
+        waypoints.slice(0, -1).map((from, i) => walkSegment(env, from, waypoints[i + 1], lang))
     );
     if (questLegResults.some((leg) => !leg)) {
         return NextResponse.json({ error: "No route found" }, { status: 404 });

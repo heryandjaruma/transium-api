@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ROUTE_PROFILES } from "@/lib/path-cost";
 import { buildJourneyForProfile, buildRoutingContext, PlannedJourney } from "@/lib/journey-planner";
+import { parseMapsLang } from "@/lib/apple-maps";
 
 type LatLng = { lat: number; lng: number };
 
@@ -19,6 +20,7 @@ function parseLatLng(value: string | null): LatLng | null {
  * Query:
  * - `origin`: "lat,lng"
  * - `destination`: "lat,lng"
+ * - `lang` (optional): "id-ID" (default) or "en-US" — language for walking step instructions
  *
  * Returns `{ alternativesAvailable, best, lessWalking?, lessTransit? }`. `best` is
  * always present — the lessWalking result, or the lessTransit one if lessWalking found
@@ -33,6 +35,7 @@ export async function GET(request: NextRequest) {
 
     const origin = parseLatLng(params.get("origin"));
     const destination = parseLatLng(params.get("destination"));
+    const lang = parseMapsLang(params.get("lang"));
 
     if (!origin || !destination) {
         return NextResponse.json({ error: "Invalid arguments" }, { status: 400 });
@@ -51,8 +54,8 @@ export async function GET(request: NextRequest) {
     const journeyCache = new Map<string, Promise<PlannedJourney | null>>();
 
     const [lessWalking, lessTransit] = await Promise.all([
-        buildJourneyForProfile(env, ctx, origin, destination, ROUTE_PROFILES.lessWalking, journeyCache),
-        buildJourneyForProfile(env, ctx, origin, destination, ROUTE_PROFILES.lessTransit, journeyCache),
+        buildJourneyForProfile(env, ctx, origin, destination, ROUTE_PROFILES.lessWalking, journeyCache, lang),
+        buildJourneyForProfile(env, ctx, origin, destination, ROUTE_PROFILES.lessTransit, journeyCache, lang),
     ]);
 
     if (!lessWalking && !lessTransit) {

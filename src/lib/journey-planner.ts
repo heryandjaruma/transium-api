@@ -4,6 +4,7 @@ import { loadRouteShapes, withLegGeometry } from "@/lib/route-geometry";
 import { pathSignature } from "@/lib/path-cost";
 import { summarizeSegments, stepsFromSegments, walkSegment } from "@/lib/journey-segments";
 import type { JourneySegment, JourneyStep, JourneySummary, LatLng } from "@/lib/journey";
+import type { MapsLang } from "@/lib/apple-maps";
 
 type Stop = { lat: number; lng: number; name: string };
 type LngLat = [number, number];
@@ -202,7 +203,8 @@ export async function buildJourneyForProfile(
     origin: LatLng & { name?: string },
     destination: LatLng & { name?: string },
     weights: CostWeights,
-    cache: Map<string, Promise<PlannedJourney | null>>
+    cache: Map<string, Promise<PlannedJourney | null>>,
+    lang?: MapsLang
 ): Promise<ProfileResult> {
     const { graph, stops, stopWaitSeconds, routeShapes, routesById } = ctx;
     const originName = origin.name ?? "Origin";
@@ -223,7 +225,7 @@ export async function buildJourneyForProfile(
     const isDirectWalk = realStops.length === 0;
 
     if (isDirectWalk) {
-        const walk = await walkSegment(env, { ...origin, name: originName }, { ...destination, name: destinationName });
+        const walk = await walkSegment(env, { ...origin, name: originName }, { ...destination, name: destinationName }, lang);
         if (!walk) return null;
         const journey = { segments: [walk], summary: summarizeSegments([walk]), steps: stepsFromSegments([walk]) };
         // All direct-walk results for a given origin/destination are the same trip,
@@ -250,7 +252,8 @@ export async function buildJourneyForProfile(
                 const initialWalk = await walkSegment(
                     env,
                     { ...origin, name: originName },
-                    { lat: boardingStop.lat, lng: boardingStop.lng, name: boardingStop.name, stopId: boardingStopId }
+                    { lat: boardingStop.lat, lng: boardingStop.lng, name: boardingStop.name, stopId: boardingStopId },
+                    lang
                 );
                 if (!initialWalk) return null;
 
@@ -259,7 +262,8 @@ export async function buildJourneyForProfile(
                 const finalWalk = await walkSegment(
                     env,
                     { lat: alightingStop.lat, lng: alightingStop.lng, name: alightingStop.name, stopId: alightingStopId },
-                    { ...destination, name: destinationName }
+                    { ...destination, name: destinationName },
+                    lang
                 );
                 if (!finalWalk) return null;
 
