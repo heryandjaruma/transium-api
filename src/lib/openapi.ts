@@ -36,10 +36,12 @@ const journeyStepSchema = {
             description:
                 "A sign-post entry — something the user must do at that point in the outline, not a leg to " +
                 "walk or ride. Only emitted by GET /journey/real, one per `mission` entry in `segments`, in the " +
-                "same position. `lat`/`lng` are present only when the underlying BadgeAction carries coordinates.",
+                "same position. `lat`/`lng` are present only when the underlying BadgeAction carries " +
+                "coordinates; `stepId` only when that request's `journeyAttemptId` resolved.",
             properties: {
                 type: { type: "string", enum: ["mission"] },
                 instructions: { type: "string", description: "The BadgeAction's own instruction, or its ActionDefinition's name if unset." },
+                stepId: { type: "string", format: "uuid", description: "The matching JourneyAttemptStep.id — see GET /journey/real's `journeyAttemptId` param." },
                 lat: { type: "number" },
                 lng: { type: "number" },
             },
@@ -413,6 +415,13 @@ export const openApiSpec = {
                                             type: "string",
                                             description: "The BadgeAction's own instruction, or its ActionDefinition's name if unset.",
                                         },
+                                        stepId: {
+                                            type: "string",
+                                            format: "uuid",
+                                            description:
+                                                "The matching JourneyAttemptStep.id from POST /private/journey/go. Present only " +
+                                                "when this request's `journeyAttemptId` resolved to a step the caller owns.",
+                                        },
                                         lat: { type: "number", description: "Present only when the BadgeAction carries coordinates." },
                                         lng: { type: "number", description: "Present only when the BadgeAction carries coordinates." },
                                     },
@@ -685,20 +694,14 @@ export const openApiSpec = {
                     id: { type: "string", format: "uuid" },
                     journeyAttemptId: { type: "string", format: "uuid" },
                     sequence: { type: "integer", description: "1-based, ordered across all of the quest's badges." },
-                    name: {
-                        type: "string",
-                        description:
-                            "The step's ActionDefinition.name, or the literal `\"takePicture\"` for an artificial " +
-                            "photo checkpoint (see POST /private/journey/go).",
-                    },
+                    name: { type: "string", description: "The step's ActionDefinition.name." },
                     description: { type: "string", description: "The BadgeAction's instruction, or ActionDefinition.description if unset." },
                     type: { type: "string", enum: ["required", "optional"], description: "The step's BadgeAction.type." },
                     actionType: {
                         oneOf: [{ type: "string" }, { type: "null" }],
                         description:
                             "The step's ActionDefinition.type — a free-text kind of action (e.g. \"photo\", " +
-                            "\"checkin\"), unrelated to `type`'s required/optional-ness. Null for an artificial " +
-                            "\"takePicture\" photo checkpoint, which has no backing ActionDefinition.",
+                            "\"checkin\"), unrelated to `type`'s required/optional-ness.",
                     },
                     lat: { oneOf: [{ type: "number" }, { type: "null" }] },
                     lng: { oneOf: [{ type: "number" }, { type: "null" }] },
@@ -1182,8 +1185,8 @@ export const openApiSpec = {
                     "connects two consecutive located checkpoints of the quest's own fixed route: a bus leg " +
                     "(searched the same way, both cost profiles) once the gap is long enough to be worth it, " +
                     "otherwise a real walking route from Apple Maps.\n\n" +
-                    "`segments` also carries a `{ type: \"mission\", instructions, lat?, lng? }` entry for " +
-                    "*every* one of the quest's own steps — across all attached badges' BadgeActions, in " +
+                    "`segments` also carries a `{ type: \"mission\", instructions, stepId?, lat?, lng? }` entry " +
+                    "for *every* one of the quest's own steps — across all attached badges' BadgeActions, in " +
                     "badge-attachment then step-sequence order (the same grouping GET /quest/{id} and POST " +
                     "/private/journey/go use) — placed right after the travel leg that reaches it. " +
                     "`instructions` is the BadgeAction's own instruction, or its ActionDefinition's name if " +
@@ -1192,10 +1195,19 @@ export const openApiSpec = {
                     "user is assumed to complete it without moving from wherever the previous step left them. " +
                     "The glanceable `steps` outline carries the same `mission` sign-posts, at the same points " +
                     "in the sequence, breaking up any `walk`/`ride` entries around them.\n\n" +
+                    "`stepId` — the matching JourneyAttemptStep.id from POST /private/journey/go — is stamped " +
+                    "onto a mission only when the caller passes `journeyAttemptId` *and* authenticates " +
+                    "(`Authorization: Bearer <session-token>`) as that attempt's own owner; it's simply " +
+                    "omitted otherwise, including when `journeyAttemptId` doesn't belong to the caller or to " +
+                    "this quest (no error — auth is optional overall, only required once `journeyAttemptId` " +
+                    "is passed). This lets a client re-fetch its route from wherever it currently is (e.g. " +
+                    "after GPS drift, or reopening mid-journey) and join each mission back to its own local " +
+                    "JourneyAttemptStep by id, rather than guessing by nearest coordinate.\n\n" +
                     "The response is the same envelope /journey/overview returns, tagged with `questId`, " +
                     "except `destination` on every journey is always the quest's last checkpoint rather than " +
                     "something the caller passed in.\n\n" +
                     alternativesEnvelopeDescription,
+                security: [{}, { bearerAuth: [] }],
                 parameters: [
                     {
                         name: "origin",
@@ -1210,6 +1222,17 @@ export const openApiSpec = {
                         in: "query",
                         required: true,
                         description: "The quest to build the route for.",
+                        schema: { type: "string", format: "uuid" },
+                    },
+                    {
+                        name: "journeyAttemptId",
+                        in: "query",
+                        required: false,
+                        description:
+                            "The caller's own in-progress JourneyAttempt for this quest. When passed, requires " +
+                            "`Authorization: Bearer <session-token>` and stamps each mission's `stepId` with the " +
+                            "matching JourneyAttemptStep.id from that attempt; omitted (or not owned by the " +
+                            "caller) simply leaves every `stepId` out, with no error.",
                         schema: { type: "string", format: "uuid" },
                     },
                     {
@@ -1265,6 +1288,15 @@ export const openApiSpec = {
                             },
                         },
                     },
+                    "401": {
+                        description: "`journeyAttemptId` was passed without a valid session — auth is only required in that case.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Unauthorized" },
+                            },
+                        },
+                    },
                     "404": {
                         description: "Quest not found, no journey could be found to the first waypoint, or Apple Maps returned no walking directions for a required leg.",
                         content: {
@@ -1291,18 +1323,13 @@ export const openApiSpec = {
                     "Creates a JourneyAttempt (`status: \"started\"`, `currentStepSequence: 0`) for the caller, " +
                     "finding or creating their UserQuest for `questId` first. Flattens every BadgeAction across " +
                     "the quest's attached badges (in badge-attachment then step-sequence order — the same " +
-                    "grouping GET /quest/{id} returns) into a JourneyStep per action, each initialised " +
+                    "grouping GET /quest/{id} returns) into one JourneyStep per action, each initialised " +
                     "`status: \"waiting\"` and carrying `actionType` — its ActionDefinition's own `type`, e.g. " +
                     "\"photo\"/\"checkin\" (unrelated to `type`'s required/optional-ness).\n\n" +
-                    "1-3 artificial `type: \"optional\"`, `actionType: null` steps (`name: \"takePicture\"`) are " +
-                    "interleaved in — one always lands on the route's first located waypoint (before the " +
-                    "quest's own first action), with up to two more spaced out by walked distance on longer " +
-                    "routes — so the user is prompted to document their journey even when none of the quest's " +
-                    "own actions do. None are added within ~600m of an existing \"take picture\"-like action.\n\n" +
-                    "`geofences` is every located step (real or artificial) as a `{ stepId, sequence, lat, lng, " +
-                    "radiusMeters }` the client should register a CLCircularRegion for — `radiusMeters` is the " +
-                    "same tolerance POST .../advance itself checks the submitted position against, so a " +
-                    "client-side region radius and the server's acceptance distance never disagree.\n\n" +
+                    "`geofences` is every located step as a `{ stepId, sequence, lat, lng, radiusMeters }` the " +
+                    "client should register a CLCircularRegion for — `radiusMeters` is the same tolerance " +
+                    "POST .../advance itself checks the submitted position against, so a client-side region " +
+                    "radius and the server's acceptance distance never disagree.\n\n" +
                     "Fails with 409 if the caller already has a JourneyAttempt with `status: \"started\"` for " +
                     "*any* quest — only one journey can be in progress at a time.",
                 security: [{ bearerAuth: [] }],

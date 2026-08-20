@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { getAuth } from "@/lib/auth";
 import { ROUTE_PROFILES } from "@/lib/path-cost";
 import { buildJourneyForProfile, buildRoutingContext, PlannedJourney, ProfileResult, RoutingContext } from "@/lib/journey-planner";
 import { summarizeSegments, stepsFromSegments, walkSegment } from "@/lib/journey-segments";
@@ -16,8 +17,11 @@ type StepRow = {
     lng: number | null;
     instruction: string | null;
     actionName: string;
+    badgeActionId: string;
 };
 type Waypoint = { lat: number; lng: number; name: string };
+/** BadgeAction.id -> the caller's own JourneyAttemptStep.id generated from it (see getStepIdsByBadgeAction). */
+type StepIdsByBadgeAction = Map<string, string>;
 
 function parseLatLng(value: string | null): LatLng | null {
     if (!value) return null;
@@ -42,7 +46,7 @@ async function getQuestSteps(db: D1Database, questId: string): Promise<StepRow[]
     const placeholders = badgeIds.map(() => "?").join(", ");
     const stepsRes = await db
         .prepare(
-            `SELECT ba.badgeId, ba.sequence, ba.lat, ba.lng, ba.instruction, ad.name as actionName
+            `SELECT ba.id as badgeActionId, ba.badgeId, ba.sequence, ba.lat, ba.lng, ba.instruction, ad.name as actionName
              FROM BadgeAction ba
              JOIN ActionDefinition ad ON ad.id = ba.actionId
              WHERE ba.badgeId IN (${placeholders})
@@ -60,15 +64,45 @@ async function getQuestSteps(db: D1Database, questId: string): Promise<StepRow[]
     return badgeIds.flatMap((badgeId) => stepsByBadge.get(badgeId) ?? []);
 }
 
+/**
+ * Resolves the caller's own JourneyAttemptStep.id for each of this quest's BadgeActions,
+ * keyed by BadgeAction.id, so mission segments/steps can be stamped with an exact
+ * `stepId` instead of leaving the client to fuzzy-match by coordinates. Scoped to
+ * `userId` and `questId` — a `journeyAttemptId` the caller doesn't own, or one that
+ * belongs to a different quest, resolves to an empty map (no stepIds stamped) rather
+ * than leaking another user's step ids.
+ */
+async function getStepIdsByBadgeAction(
+    db: D1Database,
+    journeyAttemptId: string,
+    userId: string,
+    questId: string
+): Promise<StepIdsByBadgeAction> {
+    const res = await db
+        .prepare(
+            `SELECT js.badgeActionId, js.id as stepId
+             FROM JourneyStep js
+             JOIN JourneyAttempt ja ON ja.id = js.journeyAttemptId
+             JOIN UserQuest uq ON uq.id = ja.userQuestId
+             WHERE js.journeyAttemptId = ? AND uq.userId = ? AND uq.questId = ? AND js.badgeActionId IS NOT NULL`
+        )
+        .bind(journeyAttemptId, userId, questId)
+        .all<{ badgeActionId: string; stepId: string }>();
+    return new Map(res.results.map((r) => [r.badgeActionId, r.stepId]));
+}
+
 function toWaypoint(step: StepRow & { lat: number; lng: number }): Waypoint {
     return { lat: step.lat, lng: step.lng, name: step.instruction ?? step.actionName };
 }
 
-function toMissionSegment(step: StepRow): MissionSegment {
-    const instructions = step.instruction ?? step.actionName;
-    return step.lat != null && step.lng != null
-        ? { type: "mission", instructions, lat: step.lat, lng: step.lng }
-        : { type: "mission", instructions };
+function toMissionSegment(step: StepRow, stepIdsByBadgeAction: StepIdsByBadgeAction): MissionSegment {
+    const stepId = stepIdsByBadgeAction.get(step.badgeActionId);
+    return {
+        type: "mission",
+        instructions: step.instruction ?? step.actionName,
+        ...(stepId != null ? { stepId } : {}),
+        ...(step.lat != null && step.lng != null ? { lat: step.lat, lng: step.lng } : {}),
+    };
 }
 
 /**
@@ -77,7 +111,12 @@ function toMissionSegment(step: StepRow): MissionSegment {
  * every one of the quest's steps, located or not. An unlocated step contributes only its
  * mission segment, since there's nowhere to route a travel leg to.
  */
-function buildFullJourney(originLeg: ProfileResult, questLegs: QuestLegProfileResult[], steps: StepRow[]): ProfileResult {
+function buildFullJourney(
+    originLeg: ProfileResult,
+    questLegs: QuestLegProfileResult[],
+    steps: StepRow[],
+    stepIdsByBadgeAction: StepIdsByBadgeAction
+): ProfileResult {
     if (!originLeg) return null;
     const segments: JourneySegment[] = [];
     let locatedCount = 0;
@@ -87,7 +126,7 @@ function buildFullJourney(originLeg: ProfileResult, questLegs: QuestLegProfileRe
             segments.push(...legSegments);
             locatedCount++;
         }
-        segments.push(toMissionSegment(step));
+        segments.push(toMissionSegment(step, stepIdsByBadgeAction));
     }
     const journey: PlannedJourney = { segments, summary: summarizeSegments(segments), steps: stepsFromSegments(segments) };
     return { signature: originLeg.signature, journey };
@@ -157,14 +196,25 @@ async function buildQuestLeg(
  * routes from Apple Maps, all the way to the quest's last checkpoint.
  *
  * Each of the quest's own steps — located or not — also appears in `segments` as a
- * `{ type: "mission", instructions, lat?, lng? }` entry, right after the travel leg
- * that reaches it (an unlocated step gets no travel leg, just its mission, since
+ * `{ type: "mission", instructions, stepId?, lat?, lng? }` entry, right after the travel
+ * leg that reaches it (an unlocated step gets no travel leg, just its mission, since
  * there's nowhere to route it to). The glanceable `steps` outline carries the same
  * mission sign-posts at the same points, splitting any walk/ride entries around them.
+ *
+ * `stepId` — the matching JourneyAttemptStep.id from POST /private/journey/go — is only
+ * stamped when the caller passes `journeyAttemptId` *and* authenticates as that attempt's
+ * own owner; otherwise every mission's `stepId` is simply omitted. This lets a client
+ * re-fetch its route from wherever it currently is (e.g. after GPS drift, or reopening
+ * mid-journey) and join each mission back to its own local JourneyAttemptStep by id,
+ * rather than guessing by nearest coordinate.
  *
  * Query:
  * - `origin`: caller's current position, as "lat,lng"
  * - `questId`: the quest to build the route for
+ * - `journeyAttemptId` (optional): the caller's own in-progress JourneyAttempt for this
+ *   quest — requires `Authorization: Bearer <session-token>` when passed, and is simply
+ *   ignored (no `stepId`s stamped, no error) if it doesn't belong to the caller or to
+ *   this quest
  * - `lang` (optional): "id-ID" (default) or "en-US" — language for walking step instructions
  *
  * Returns the same envelope /api/journey/overview does — `{ questId,
@@ -177,6 +227,7 @@ export async function GET(request: NextRequest) {
 
     const origin = parseLatLng(params.get("origin"));
     const questId = params.get("questId");
+    const journeyAttemptId = params.get("journeyAttemptId");
     const lang = parseMapsLang(params.get("lang"));
     if (!origin || !questId) {
         return NextResponse.json({ error: "Invalid arguments" }, { status: 400 });
@@ -186,6 +237,13 @@ export async function GET(request: NextRequest) {
 
     const quest = await env.DB.prepare(`SELECT id FROM Quest WHERE id = ?`).bind(questId).first();
     if (!quest) return NextResponse.json({ error: "Quest not found" }, { status: 404 });
+
+    let stepIdsByBadgeAction: StepIdsByBadgeAction = new Map();
+    if (journeyAttemptId) {
+        const session = await getAuth().api.getSession({ headers: request.headers });
+        if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        stepIdsByBadgeAction = await getStepIdsByBadgeAction(env.DB, journeyAttemptId, session.user.id, questId);
+    }
 
     const steps = await getQuestSteps(env.DB, questId);
     const waypoints = steps
@@ -216,8 +274,8 @@ export async function GET(request: NextRequest) {
     }
     const questLegs = questLegResults as QuestLegByProfile[];
 
-    const lessWalkingFull = buildFullJourney(lessWalking, questLegs.map((leg) => leg.lessWalking), steps);
-    const lessTransitFull = buildFullJourney(lessTransit, questLegs.map((leg) => leg.lessTransit), steps);
+    const lessWalkingFull = buildFullJourney(lessWalking, questLegs.map((leg) => leg.lessWalking), steps, stepIdsByBadgeAction);
+    const lessTransitFull = buildFullJourney(lessTransit, questLegs.map((leg) => leg.lessTransit), steps, stepIdsByBadgeAction);
 
     // Combine the origin leg's signature with every quest leg's signature so a
     // divergence between profiles on any leg — not just the origin leg — is what

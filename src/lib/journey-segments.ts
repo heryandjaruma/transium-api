@@ -84,11 +84,12 @@ export function stepsFromSegments(segments: JourneySegment[]): JourneyStep[] {
     const steps: JourneyStep[] = [];
     for (const seg of segments) {
         if (seg.type === "mission") {
-            steps.push(
-                seg.lat != null && seg.lng != null
-                    ? { type: "mission", instructions: seg.instructions, lat: seg.lat, lng: seg.lng }
-                    : { type: "mission", instructions: seg.instructions }
-            );
+            steps.push({
+                type: "mission",
+                instructions: seg.instructions,
+                ...(seg.stepId != null ? { stepId: seg.stepId } : {}),
+                ...(seg.lat != null && seg.lng != null ? { lat: seg.lat, lng: seg.lng } : {}),
+            });
             continue;
         }
 

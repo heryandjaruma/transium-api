@@ -45,6 +45,7 @@ export type BusSegment = {
 export type MissionSegment = {
     type: "mission"
     instructions: string
+    stepId?: string
     lat?: number
     lng?: number
 }
@@ -67,7 +68,7 @@ export type JourneySummary = {
 export type JourneyStep =
     | { type: "walk"; durationMinutes: number }
     | { type: "ride"; routeRef: string; routeName: string | null; durationMinutes: number }
-    | { type: "mission"; instructions: string; lat?: number; lng?: number }
+    | { type: "mission"; instructions: string; stepId?: string; lat?: number; lng?: number }
 
 export type JourneyOverview = {
     origin: LatLng
