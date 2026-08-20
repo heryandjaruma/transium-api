@@ -23,6 +23,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
 	title: "Transium Admin",
 	description: "Transium Admin Panel",
+	icons: {
+		icon: "/AppIcon.png",
+	},
 };
 
 export default function RootLayout({
@@ -32,9 +35,6 @@ export default function RootLayout({
 }>) {
 	return (
 		<html lang="en" className={cn("font-sans", inter.variable, figtreeHeading.variable)}>
-			<head>
-				<link rel="icon" href="/favicon.svg" type="image/svg+xml"></link>
-			</head>
 			<body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
 				<TooltipProvider>
 					<SidebarProvider>
