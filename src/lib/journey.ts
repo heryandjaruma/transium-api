@@ -61,10 +61,13 @@ export type JourneySummary = {
 }
 
 // A brief, glanceable outline of a journey — e.g. "Walk 5 min", "K5B", "Walk 3 min" —
-// so a user can tell what a route mostly looks like without reading every segment.
+// so a user can tell what a route mostly looks like without reading every segment. The
+// "mission" entry (real journeys only) is a sign-post: something the user must do at
+// that point in the outline, not a leg to walk or ride.
 export type JourneyStep =
     | { type: "walk"; durationMinutes: number }
     | { type: "ride"; routeRef: string; routeName: string | null; durationMinutes: number }
+    | { type: "mission"; instructions: string; lat?: number; lng?: number }
 
 export type JourneyOverview = {
     origin: LatLng

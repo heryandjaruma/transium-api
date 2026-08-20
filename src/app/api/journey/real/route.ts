@@ -159,7 +159,8 @@ async function buildQuestLeg(
  * Each of the quest's own steps — located or not — also appears in `segments` as a
  * `{ type: "mission", instructions, lat?, lng? }` entry, right after the travel leg
  * that reaches it (an unlocated step gets no travel leg, just its mission, since
- * there's nowhere to route it to).
+ * there's nowhere to route it to). The glanceable `steps` outline carries the same
+ * mission sign-posts at the same points, splitting any walk/ride entries around them.
  *
  * Query:
  * - `origin`: caller's current position, as "lat,lng"

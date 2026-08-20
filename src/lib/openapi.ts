@@ -30,6 +30,20 @@ const journeyStepSchema = {
                 durationMinutes: { type: "number", description: "Rounded to the nearest minute." },
             },
         },
+        {
+            type: "object",
+            required: ["type", "instructions"],
+            description:
+                "A sign-post entry — something the user must do at that point in the outline, not a leg to " +
+                "walk or ride. Only emitted by GET /journey/real, one per `mission` entry in `segments`, in the " +
+                "same position. `lat`/`lng` are present only when the underlying BadgeAction carries coordinates.",
+            properties: {
+                type: { type: "string", enum: ["mission"] },
+                instructions: { type: "string", description: "The BadgeAction's own instruction, or its ActionDefinition's name if unset." },
+                lat: { type: "number" },
+                lng: { type: "number" },
+            },
+        },
     ],
 } as const
 
@@ -1168,7 +1182,9 @@ export const openApiSpec = {
                     "`instructions` is the BadgeAction's own instruction, or its ActionDefinition's name if " +
                     "unset; `lat`/`lng` are included only when the BadgeAction has coordinates. A step with no " +
                     "coordinates contributes only its `mission` entry, with no travel leg routed to it — the " +
-                    "user is assumed to complete it without moving from wherever the previous step left them.\n\n" +
+                    "user is assumed to complete it without moving from wherever the previous step left them. " +
+                    "The glanceable `steps` outline carries the same `mission` sign-posts, at the same points " +
+                    "in the sequence, breaking up any `walk`/`ride` entries around them.\n\n" +
                     "The response is the same envelope /journey/overview returns, tagged with `questId`, " +
                     "except `destination` on every journey is always the quest's last checkpoint rather than " +
                     "something the caller passed in.\n\n" +

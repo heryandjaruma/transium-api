@@ -75,12 +75,22 @@ export function summarizeSegments(segments: JourneySegment[]): JourneySummary {
  * Collapses journey segments into a brief outline — e.g. "Walk 5 min", "K5B", "Walk 3
  * min" — merging adjacent walk/transfer segments (both are walking to the rider) so a
  * boarding-stop transfer right after a walk, or a quest's own walking legs tacked onto
- * a transit leg's final walk, doesn't show as separate walk steps.
+ * a transit leg's final walk, doesn't show as separate walk steps. A `mission` segment
+ * becomes its own sign-post entry instead — it's not travel, so it's never merged, and
+ * it also breaks the walk-merging run (a walk right before and right after a mission
+ * stay two separate steps, since the mission happens between them).
  */
 export function stepsFromSegments(segments: JourneySegment[]): JourneyStep[] {
     const steps: JourneyStep[] = [];
     for (const seg of segments) {
-        if (seg.type === "mission") continue;
+        if (seg.type === "mission") {
+            steps.push(
+                seg.lat != null && seg.lng != null
+                    ? { type: "mission", instructions: seg.instructions, lat: seg.lat, lng: seg.lng }
+                    : { type: "mission", instructions: seg.instructions }
+            );
+            continue;
+        }
 
         if (seg.type === "bus") {
             steps.push({
