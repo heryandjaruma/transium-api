@@ -38,15 +38,20 @@ type JourneyStepRow = {
 };
 
 /**
- * Advances a journey attempt from a geofence trigger. Body: `{ stepId, lat, lng }` — the
- * JourneyStep whose geofence just fired, plus the device's current position, checked
- * against that step's own lat/lng so arrival can't be spoofed.
+ * Advances a journey attempt by completing one of its steps. Body: `{ stepId, lat?, lng? }`.
  *
- * The caller may be geofenced into a step ahead of `currentStepSequence` (e.g. they
+ * A located step (has lat/lng) is proven by geofence: `lat`/`lng` — the device's current
+ * position — are required and checked against that step's own location, within its
+ * `radiusMeters`, so arrival can't be spoofed by just naming a `stepId`. An unlocated
+ * step has nothing to prove against, so `lat`/`lng` aren't required (and are ignored if
+ * sent) — passing just its `stepId` is itself the "I did this" attestation, trusted from
+ * the client with no server-side verification.
+ *
+ * The caller may be advanced into a step ahead of `currentStepSequence` (e.g. they
  * walked past an optional photo stop without opening the app). Any `type: "optional"`
  * step skipped over is auto-marked `status: "done"`; any `type: "required"` step skipped
  * over is left `"waiting"` and caps how far `currentStepSequence` moves, since a required
- * step's completion can't be inferred from a later step's geofence alone.
+ * step's completion can't be inferred from a later step's trigger alone.
  *
  * Never finishes the attempt itself, even once every step ends up `"done"` — `status`
  * stays `"started"` and the parent UserQuest is untouched. POST .../complete is the only
@@ -67,9 +72,6 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     if (typeof stepId !== "string" || !stepId.trim()) {
         return NextResponse.json({ error: "Invalid stepId" }, { status: 400 });
-    }
-    if (typeof lat !== "number" || !Number.isFinite(lat) || typeof lng !== "number" || !Number.isFinite(lng)) {
-        return NextResponse.json({ error: "Invalid lat/lng" }, { status: 400 });
     }
 
     const { env } = getCloudflareContext();
@@ -106,19 +108,24 @@ export async function POST(request: NextRequest, { params }: Params) {
         return NextResponse.json({ journeyAttempt, steps });
     }
 
-    if (target.lat == null || target.lng == null) {
-        return NextResponse.json({ error: "This step isn't location-based" }, { status: 400 });
-    }
-
-    const distance = haversine({ lat: target.lat, lng: target.lng }, { lat, lng });
-    const tolerance = target.radiusMeters ?? DEFAULT_GEOFENCE_TOLERANCE_METERS;
-    if (distance > tolerance) {
-        return NextResponse.json({ error: "Too far from this step's location" }, { status: 400 });
+    // Only a located step needs geofence proof — an unlocated one has nothing to check
+    // the submitted position against, so reaching this point with its stepId is itself
+    // the completion (see the docstring above).
+    if (target.lat != null && target.lng != null) {
+        if (typeof lat !== "number" || !Number.isFinite(lat) || typeof lng !== "number" || !Number.isFinite(lng)) {
+            return NextResponse.json({ error: "Invalid lat/lng" }, { status: 400 });
+        }
+        const distance = haversine({ lat: target.lat, lng: target.lng }, { lat, lng });
+        const tolerance = target.radiusMeters ?? DEFAULT_GEOFENCE_TOLERANCE_METERS;
+        if (distance > tolerance) {
+            return NextResponse.json({ error: "Too far from this step's location" }, { status: 400 });
+        }
     }
 
     // Walk every not-yet-done step up to and including the target: the target itself is
-    // proven by its own geofence, optional steps in between are forgiven, and any
-    // required step in between blocks currentStepSequence from moving past it.
+    // already proven (geofence check above, or attestation for an unlocated step),
+    // optional steps in between are forgiven, and any required step in between blocks
+    // currentStepSequence from moving past it.
     const newlyDone: JourneyStepRow[] = [];
     for (const step of steps) {
         if (step.sequence > target.sequence || step.status === "done") continue;

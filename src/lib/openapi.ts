@@ -1555,16 +1555,19 @@ export const openApiSpec = {
         "/private/journey/{id}/advance": {
             post: {
                 tags: ["Journey"],
-                summary: "Advance a journey attempt from a geofence trigger",
+                summary: "Advance a journey attempt by completing a step",
                 description:
-                    "Body: `{ stepId, lat, lng }` — the JourneyStep whose geofence just fired, plus the " +
-                    "device's current position, checked against that step's own lat/lng (within ~150m) so " +
-                    "arrival can't be spoofed.\n\n" +
-                    "The caller may be geofenced into a step ahead of `currentStepSequence` (e.g. they walked " +
+                    "Body: `{ stepId, lat?, lng? }`. A located step (has lat/lng) is proven by geofence: " +
+                    "`lat`/`lng` — the device's current position — are required and checked against that " +
+                    "step's own lat/lng (within ~150m) so arrival can't be spoofed. An unlocated step has " +
+                    "nothing to prove against, so `lat`/`lng` aren't required (and are ignored if sent) — " +
+                    "passing just its `stepId` is itself the \"I did this\" attestation, trusted from the " +
+                    "client with no server-side verification.\n\n" +
+                    "The caller may be advanced into a step ahead of `currentStepSequence` (e.g. they walked " +
                     "past an optional photo stop without opening the app). Any `type: \"optional\"` step " +
                     "skipped over is auto-marked `status: \"done\"`; any `type: \"required\"` step skipped " +
                     "over is left `\"waiting\"` and caps how far `currentStepSequence` moves, since a required " +
-                    "step's completion can't be inferred from a later step's geofence alone.\n\n" +
+                    "step's completion can't be inferred from a later step's trigger alone.\n\n" +
                     "Never finishes the attempt itself, even once every step ends up `\"done\"` — `status` " +
                     "stays `\"started\"` and the parent UserQuest is untouched. POST .../complete is the only " +
                     "endpoint that actually finalizes an attempt and awards xp/badges, so the client is " +
@@ -1580,14 +1583,23 @@ export const openApiSpec = {
                         "application/json": {
                             schema: {
                                 type: "object",
-                                required: ["stepId", "lat", "lng"],
+                                required: ["stepId"],
                                 properties: {
                                     stepId: { type: "string", format: "uuid" },
-                                    lat: { type: "number" },
-                                    lng: { type: "number" },
+                                    lat: { type: "number", description: "Required only when the target step has lat/lng of its own." },
+                                    lng: { type: "number", description: "Required only when the target step has lat/lng of its own." },
                                 },
                             },
-                            example: { stepId: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f", lat: -6.914744, lng: 107.60981 },
+                            examples: {
+                                locatedStep: {
+                                    summary: "Located step — proven by geofence",
+                                    value: { stepId: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f", lat: -6.914744, lng: 107.60981 },
+                                },
+                                unlocatedStep: {
+                                    summary: "Unlocated step — client attestation, no lat/lng needed",
+                                    value: { stepId: "6b1f7a2a-2f2e-4c2a-9b0a-1e2d3c4b5a6f" },
+                                },
+                            },
                         },
                     },
                 },
@@ -1608,14 +1620,13 @@ export const openApiSpec = {
                         },
                     },
                     "400": {
-                        description: "Missing/invalid `stepId` or `lat`/`lng`, the step has no lat/lng, or the submitted position is too far from it.",
+                        description: "Missing/invalid `stepId`, missing/invalid `lat`/`lng` on a located step, or the submitted position is too far from it.",
                         content: {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 examples: {
                                     invalidStep: { value: { error: "Invalid stepId" } },
                                     invalidLatLng: { value: { error: "Invalid lat/lng" } },
-                                    notLocationBased: { value: { error: "This step isn't location-based" } },
                                     tooFar: { value: { error: "Too far from this step's location" } },
                                 },
                             },
