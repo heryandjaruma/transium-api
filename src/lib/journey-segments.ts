@@ -58,6 +58,7 @@ export function summarizeSegments(segments: JourneySegment[]): JourneySummary {
             transitDistanceMeters += seg.distanceMeters ?? 0;
             transferCount++;
         }
+        // "mission" segments aren't travel — nothing to total.
     }
 
     return {
@@ -79,6 +80,8 @@ export function summarizeSegments(segments: JourneySegment[]): JourneySummary {
 export function stepsFromSegments(segments: JourneySegment[]): JourneyStep[] {
     const steps: JourneyStep[] = [];
     for (const seg of segments) {
+        if (seg.type === "mission") continue;
+
         if (seg.type === "bus") {
             steps.push({
                 type: "ride",

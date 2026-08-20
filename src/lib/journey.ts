@@ -42,7 +42,14 @@ export type BusSegment = {
     geometry: [number, number][]
 }
 
-export type JourneySegment = WalkSegment | TransferSegment | BusSegment
+export type MissionSegment = {
+    type: "mission"
+    instructions: string
+    lat?: number
+    lng?: number
+}
+
+export type JourneySegment = WalkSegment | TransferSegment | BusSegment | MissionSegment
 
 export type JourneySummary = {
     distanceMeters: number

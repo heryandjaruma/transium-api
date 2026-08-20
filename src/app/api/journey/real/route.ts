@@ -4,12 +4,12 @@ import { ROUTE_PROFILES } from "@/lib/path-cost";
 import { buildJourneyForProfile, buildRoutingContext, PlannedJourney, ProfileResult, RoutingContext } from "@/lib/journey-planner";
 import { summarizeSegments, stepsFromSegments, walkSegment } from "@/lib/journey-segments";
 import { haversine } from "@/lib/bus-graph";
-import type { JourneySegment } from "@/lib/journey";
+import type { JourneySegment, MissionSegment } from "@/lib/journey";
 import { parseMapsLang, MapsLang } from "@/lib/apple-maps";
 
 type LatLng = { lat: number; lng: number };
 type QuestBadgeRow = { badgeId: string };
-type WaypointRow = {
+type StepRow = {
     badgeId: string;
     sequence: number;
     lat: number | null;
@@ -28,13 +28,13 @@ function parseLatLng(value: string | null): LatLng | null {
 }
 
 /**
- * Returns the quest's badge-attached waypoints that carry a lat/lng, flattened in
- * badge-attachment then step-sequence order — same ordering as
- * `getQuestOverviewSteps` in `POST /private/journey/go`. Steps without coordinates
- * (e.g. a "read this" action) don't correspond to a place, so they're dropped here
- * rather than producing a zero-length walk leg.
+ * Returns every one of the quest's badge-attached steps, flattened in badge-attachment
+ * then step-sequence order — same ordering as `getQuestOverviewSteps` in `POST
+ * /private/journey/go`. Unlike a plain waypoint list, steps without coordinates (e.g. a
+ * "read this" action) are kept: they still become a `mission` segment, they just don't
+ * get a travel leg routed to them.
  */
-async function getQuestWaypoints(db: D1Database, questId: string): Promise<Waypoint[]> {
+async function getQuestSteps(db: D1Database, questId: string): Promise<StepRow[]> {
     const badgesRes = await db.prepare(`SELECT badgeId FROM QuestBadge WHERE questId = ?`).bind(questId).all<QuestBadgeRow>();
     const badgeIds = badgesRes.results.map((b) => b.badgeId);
     if (badgeIds.length === 0) return [];
@@ -49,27 +49,48 @@ async function getQuestWaypoints(db: D1Database, questId: string): Promise<Waypo
              ORDER BY ba.sequence`
         )
         .bind(...badgeIds)
-        .all<WaypointRow>();
+        .all<StepRow>();
 
-    const stepsByBadge = new Map<string, WaypointRow[]>();
+    const stepsByBadge = new Map<string, StepRow[]>();
     for (const step of stepsRes.results) {
         if (!stepsByBadge.has(step.badgeId)) stepsByBadge.set(step.badgeId, []);
         stepsByBadge.get(step.badgeId)!.push(step);
     }
 
-    return badgeIds
-        .flatMap((badgeId) => stepsByBadge.get(badgeId) ?? [])
-        .filter((step): step is WaypointRow & { lat: number; lng: number } => step.lat != null && step.lng != null)
-        .map((step) => ({ lat: step.lat, lng: step.lng, name: step.instruction ?? step.actionName }));
+    return badgeIds.flatMap((badgeId) => stepsByBadge.get(badgeId) ?? []);
 }
 
-/** Appends the quest's own fixed legs onto a profile's origin→first-waypoint result. */
-function appendQuestLegs(result: ProfileResult, questLegs: JourneySegment[]): ProfileResult {
-    if (!result) return null;
-    if (questLegs.length === 0) return result;
-    const segments = [...result.journey.segments, ...questLegs];
+function toWaypoint(step: StepRow & { lat: number; lng: number }): Waypoint {
+    return { lat: step.lat, lng: step.lng, name: step.instruction ?? step.actionName };
+}
+
+function toMissionSegment(step: StepRow): MissionSegment {
+    const instructions = step.instruction ?? step.actionName;
+    return step.lat != null && step.lng != null
+        ? { type: "mission", instructions, lat: step.lat, lng: step.lng }
+        : { type: "mission", instructions };
+}
+
+/**
+ * Interleaves one profile's travel legs — the origin→first-waypoint search result, plus
+ * one quest leg per gap between consecutive located steps — with a `mission` segment for
+ * every one of the quest's steps, located or not. An unlocated step contributes only its
+ * mission segment, since there's nowhere to route a travel leg to.
+ */
+function buildFullJourney(originLeg: ProfileResult, questLegs: QuestLegProfileResult[], steps: StepRow[]): ProfileResult {
+    if (!originLeg) return null;
+    const segments: JourneySegment[] = [];
+    let locatedCount = 0;
+    for (const step of steps) {
+        if (step.lat != null && step.lng != null) {
+            const legSegments = locatedCount === 0 ? originLeg.journey.segments : questLegs[locatedCount - 1].segments;
+            segments.push(...legSegments);
+            locatedCount++;
+        }
+        segments.push(toMissionSegment(step));
+    }
     const journey: PlannedJourney = { segments, summary: summarizeSegments(segments), steps: stepsFromSegments(segments) };
-    return { signature: result.signature, journey };
+    return { signature: originLeg.signature, journey };
 }
 
 // Between-mission legs stay a plain walk below this distance — a bus is only worth
@@ -135,6 +156,11 @@ async function buildQuestLeg(
  * attached badges' BadgeActions that carry a lat/lng, connected with real walking
  * routes from Apple Maps, all the way to the quest's last checkpoint.
  *
+ * Each of the quest's own steps — located or not — also appears in `segments` as a
+ * `{ type: "mission", instructions, lat?, lng? }` entry, right after the travel leg
+ * that reaches it (an unlocated step gets no travel leg, just its mission, since
+ * there's nowhere to route it to).
+ *
  * Query:
  * - `origin`: caller's current position, as "lat,lng"
  * - `questId`: the quest to build the route for
@@ -160,7 +186,10 @@ export async function GET(request: NextRequest) {
     const quest = await env.DB.prepare(`SELECT id FROM Quest WHERE id = ?`).bind(questId).first();
     if (!quest) return NextResponse.json({ error: "Quest not found" }, { status: 404 });
 
-    const waypoints = await getQuestWaypoints(env.DB, questId);
+    const steps = await getQuestSteps(env.DB, questId);
+    const waypoints = steps
+        .filter((step): step is StepRow & { lat: number; lng: number } => step.lat != null && step.lng != null)
+        .map(toWaypoint);
     if (waypoints.length === 0) {
         return NextResponse.json({ error: "This quest has no located steps to route to" }, { status: 400 });
     }
@@ -185,11 +214,9 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: "No route found" }, { status: 404 });
     }
     const questLegs = questLegResults as QuestLegByProfile[];
-    const lessWalkingQuestLegs = questLegs.flatMap((leg) => leg.lessWalking.segments);
-    const lessTransitQuestLegs = questLegs.flatMap((leg) => leg.lessTransit.segments);
 
-    const lessWalkingFull = appendQuestLegs(lessWalking, lessWalkingQuestLegs);
-    const lessTransitFull = appendQuestLegs(lessTransit, lessTransitQuestLegs);
+    const lessWalkingFull = buildFullJourney(lessWalking, questLegs.map((leg) => leg.lessWalking), steps);
+    const lessTransitFull = buildFullJourney(lessTransit, questLegs.map((leg) => leg.lessTransit), steps);
 
     // Combine the origin leg's signature with every quest leg's signature so a
     // divergence between profiles on any leg — not just the origin leg — is what
