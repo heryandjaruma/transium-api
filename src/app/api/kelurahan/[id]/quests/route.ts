@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 type Params = { params: Promise<{ id: string }> };
-type KelurahanRow = { id: string; kelurahanName: string; kecamatanName: string };
+type KelurahanRow = { id: string; kelurahanName: string; kecamatanName: string; description: string | null; category: string | null };
 type QuestRow = { id: string; name: string; category: string; description: string; xp: number; label: string | null };
-type MediaRow = { id: string; createdAt: string; type: string; url: string };
+type MediaRow = { id: string; createdAt: string; type: string; url: string; alt: string | null; copyright: string | null };
 type QuestBadgeRow = {
     id: string;
     questId: string;
@@ -17,17 +17,26 @@ type QuestBadgeRow = {
 
 /**
  * Returns the quests available in a kelurahan (quests with at least one badge scoped
- * to it via Badge.kelurahanId), each with its thumbnails and all of its attached badges.
+ * to it via Badge.kelurahanId), each with its thumbnails and all of its attached
+ * badges. `kelurahan` includes its own thumbnails.
  */
 export async function GET(_request: NextRequest, { params }: Params) {
     const { id } = await params;
     const { env } = getCloudflareContext();
 
-    const kelurahan = await env.DB
-        .prepare(`SELECT id, kelurahanName, kecamatanName FROM Kelurahan WHERE id = ?`)
-        .bind(id)
-        .first<KelurahanRow>();
-    if (!kelurahan) return NextResponse.json({ error: "Kelurahan not found" }, { status: 404 });
+    const [kelurahanRow, kelurahanMediaRes] = await Promise.all([
+        env.DB.prepare(`SELECT id, kelurahanName, kecamatanName, description, category FROM Kelurahan WHERE id = ?`).bind(id).first<KelurahanRow>(),
+        env.DB
+            .prepare(
+                `SELECT m.id as id, m.createdAt as createdAt, m.type as type, m.url as url, m.alt as alt, m.copyright as copyright
+                 FROM KelurahanMedia km JOIN Media m ON m.id = km.mediaId
+                 WHERE km.kelurahanId = ?`
+            )
+            .bind(id)
+            .all<MediaRow>(),
+    ]);
+    if (!kelurahanRow) return NextResponse.json({ error: "Kelurahan not found" }, { status: 404 });
+    const kelurahan = { ...kelurahanRow, thumbnails: kelurahanMediaRes.results };
 
     const questsRes = await env.DB
         .prepare(
@@ -49,7 +58,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const [mediaRes, badgesRes] = await Promise.all([
         env.DB
             .prepare(
-                `SELECT qm.questId as questId, m.id as id, m.createdAt as createdAt, m.type as type, m.url as url
+                `SELECT qm.questId as questId, m.id as id, m.createdAt as createdAt, m.type as type, m.url as url, m.alt as alt, m.copyright as copyright
                  FROM QuestMedia qm JOIN Media m ON m.id = qm.mediaId
                  WHERE qm.questId IN (${placeholders})`
             )

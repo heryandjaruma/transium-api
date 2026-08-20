@@ -613,11 +613,17 @@ export const openApiSpec = {
             },
             Kelurahan: {
                 type: "object",
-                required: ["id", "kelurahanName", "kecamatanName"],
+                required: ["id", "kelurahanName", "kecamatanName", "description", "category", "thumbnails"],
                 properties: {
                     id: { type: "string" },
                     kelurahanName: { type: "string" },
                     kecamatanName: { type: "string" },
+                    description: { type: ["string", "null"], description: "A brief, catchy description of the kelurahan. Null if unset." },
+                    category: {
+                        type: ["string", "null"],
+                        description: "Comma-separated majority destination types here, e.g. \"Beach,Mountains\". Null if unset.",
+                    },
+                    thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
                 },
             },
             JourneyAttempt: {

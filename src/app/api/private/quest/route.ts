@@ -11,7 +11,7 @@ type QuestRow = {
     label: string | null;
     userQuestStatus: string | null;
 };
-type MediaRow = { id: string; createdAt: string; type: string; url: string };
+type MediaRow = { id: string; createdAt: string; type: string; url: string; alt: string | null; copyright: string | null };
 
 /** Attaches each quest's thumbnail media (via QuestMedia) in a single query. */
 async function attachThumbnails(db: D1Database, quests: QuestRow[]) {
@@ -20,7 +20,7 @@ async function attachThumbnails(db: D1Database, quests: QuestRow[]) {
     const placeholders = quests.map(() => "?").join(", ");
     const res = await db
         .prepare(
-            `SELECT qm.questId as questId, m.id as id, m.createdAt as createdAt, m.type as type, m.url as url
+            `SELECT qm.questId as questId, m.id as id, m.createdAt as createdAt, m.type as type, m.url as url, m.alt as alt, m.copyright as copyright
              FROM QuestMedia qm JOIN Media m ON m.id = qm.mediaId
              WHERE qm.questId IN (${placeholders})`
         )
