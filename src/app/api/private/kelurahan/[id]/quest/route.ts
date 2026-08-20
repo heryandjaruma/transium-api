@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { getAuth } from "@/lib/auth";
+import { haversine } from "@/lib/bus-graph";
+import { getQuestOrigins, parseLatLng } from "@/lib/quest-origin";
 
 type Params = { params: Promise<{ id: string }> };
 type KelurahanRow = { id: string; kelurahanName: string; kecamatanName: string; description: string | null; category: string | null };
@@ -16,12 +19,21 @@ type QuestBadgeRow = {
 };
 
 /**
- * Returns the quests available in a kelurahan (quests with at least one badge scoped
- * to it via Badge.kelurahanId), each with its thumbnails and all of its attached
- * badges. `kelurahan` includes its own thumbnails.
+ * Returns the quests available in a kelurahan — the private, authenticated
+ * counterpart to GET /kelurahan/{id}/quests. `kelurahan` includes its own
+ * thumbnails. Each quest carries its thumbnails, all of its attached badges, and
+ * `distanceMeters`: the straight-line (haversine) distance from the caller-supplied
+ * `origin` query param ("lat,lng") to the quest's own origin coordinate (its first
+ * badge step with a lat/lng, in attachment order — the same point QuestDetail.origin
+ * uses). `distanceMeters` is `null` when `origin` is missing/invalid, or when the
+ * quest has no located step to measure to.
  */
-export async function GET(_request: NextRequest, { params }: Params) {
+export async function GET(request: NextRequest, { params }: Params) {
     const { id } = await params;
+    const session = await getAuth().api.getSession({ headers: request.headers });
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const origin = parseLatLng(request.nextUrl.searchParams.get("origin"));
     const { env } = getCloudflareContext();
 
     const [kelurahanRow, kelurahanMediaRes] = await Promise.all([
@@ -55,7 +67,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const placeholders = quests.map(() => "?").join(", ");
     const questIds = quests.map((q) => q.id);
 
-    const [mediaRes, badgesRes] = await Promise.all([
+    const [mediaRes, badgesRes, questOrigins] = await Promise.all([
         env.DB
             .prepare(
                 `SELECT qm.questId as questId, m.id as id, m.createdAt as createdAt, m.type as type, m.url as url, m.alt as alt, m.copyright as copyright
@@ -74,6 +86,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
             )
             .bind(...questIds)
             .all<QuestBadgeRow>(),
+        origin ? getQuestOrigins(env.DB, questIds) : Promise.resolve(new Map()),
     ]);
 
     const thumbnailsByQuest = new Map<string, MediaRow[]>();
@@ -90,10 +103,14 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
     return NextResponse.json({
         kelurahan,
-        quests: quests.map((quest) => ({
-            ...quest,
-            thumbnails: thumbnailsByQuest.get(quest.id) ?? [],
-            badges: badgesByQuest.get(quest.id) ?? [],
-        })),
+        quests: quests.map((quest) => {
+            const questOrigin = questOrigins.get(quest.id);
+            return {
+                ...quest,
+                thumbnails: thumbnailsByQuest.get(quest.id) ?? [],
+                badges: badgesByQuest.get(quest.id) ?? [],
+                distanceMeters: origin && questOrigin ? haversine(origin, questOrigin) : null,
+            };
+        }),
     });
 }
