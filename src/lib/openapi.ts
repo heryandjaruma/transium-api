@@ -384,6 +384,25 @@ export const openApiSpec = {
                                         },
                                     },
                                 },
+                                {
+                                    type: "object",
+                                    required: ["type", "instructions"],
+                                    description:
+                                        "A quest step the user must actually do there — only emitted by GET /journey/real, " +
+                                        "never by /journey/overview. Appears right after the travel leg (if any) that " +
+                                        "reaches it, in the same badge-attachment/step-sequence order GET /quest/{id} and " +
+                                        "POST /private/journey/go use. A step with no coordinates contributes only this " +
+                                        "entry — no travel leg is routed to it.",
+                                    properties: {
+                                        type: { type: "string", enum: ["mission"] },
+                                        instructions: {
+                                            type: "string",
+                                            description: "The BadgeAction's own instruction, or its ActionDefinition's name if unset.",
+                                        },
+                                        lat: { type: "number", description: "Present only when the BadgeAction carries coordinates." },
+                                        lng: { type: "number", description: "Present only when the BadgeAction carries coordinates." },
+                                    },
+                                },
                             ],
                         },
                     },
@@ -1139,10 +1158,17 @@ export const openApiSpec = {
                     "quest's own first step. The leg from `origin` to the quest's first located waypoint is " +
                     "routed exactly like /journey/overview — walking and/or transit, searched under both cost " +
                     "profiles, since the caller could be anywhere relative to the quest. Every leg after that " +
-                    "is the quest's own fixed route: its ordered checkpoints across all attached badges' " +
-                    "BadgeActions that carry a lat/lng (in badge-attachment then step-sequence order — the same " +
-                    "grouping GET /quest/{id} and POST /private/journey/go use), connected with real walking " +
-                    "routes from Apple Maps all the way to the quest's last checkpoint.\n\n" +
+                    "connects two consecutive located checkpoints of the quest's own fixed route: a bus leg " +
+                    "(searched the same way, both cost profiles) once the gap is long enough to be worth it, " +
+                    "otherwise a real walking route from Apple Maps.\n\n" +
+                    "`segments` also carries a `{ type: \"mission\", instructions, lat?, lng? }` entry for " +
+                    "*every* one of the quest's own steps — across all attached badges' BadgeActions, in " +
+                    "badge-attachment then step-sequence order (the same grouping GET /quest/{id} and POST " +
+                    "/private/journey/go use) — placed right after the travel leg that reaches it. " +
+                    "`instructions` is the BadgeAction's own instruction, or its ActionDefinition's name if " +
+                    "unset; `lat`/`lng` are included only when the BadgeAction has coordinates. A step with no " +
+                    "coordinates contributes only its `mission` entry, with no travel leg routed to it — the " +
+                    "user is assumed to complete it without moving from wherever the previous step left them.\n\n" +
                     "The response is the same envelope /journey/overview returns, tagged with `questId`, " +
                     "except `destination` on every journey is always the quest's last checkpoint rather than " +
                     "something the caller passed in.\n\n" +
