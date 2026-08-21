@@ -2,7 +2,8 @@
 // /api/openapi.json and rendered by Scalar at /reference.
 //
 // Only documents /api/astar, the Trip-tagged /api/journey/overview and /api/journey/real,
-// /api/maps/route, /api/maps/search, /api/maps/search/resolve, /api/maps/geocode, the
+// /api/maps/route, /api/maps/search, /api/maps/search/resolve, /api/maps/geocode,
+// /api/maps/reverse-geocode, the
 // Quest-tagged paths, and the Journey-tagged /api/private/journey* paths for now — add
 // other paths here as they get documented.
 
@@ -169,7 +170,8 @@ export const openApiSpec = {
                 "Place search and geocoding for Bali. `GET /maps/search` gives as-you-type suggestions from " +
                 "Apple Maps; `GET /maps/search/resolve` turns one of those suggestions into coordinates when it " +
                 "didn't already carry them; `GET /maps/geocode` resolves a full address or place name entered " +
-                "in one go, falling back to OpenStreetMap when Apple's Indonesia coverage comes up empty.",
+                "in one go; and `GET /maps/reverse-geocode` converts current coordinates into a readable address. " +
+                "The geocoding endpoints fall back to OpenStreetMap when Apple's Indonesia coverage comes up empty.",
         },
         {
             name: "Account",
@@ -3516,6 +3518,82 @@ export const openApiSpec = {
                     },
                     "400": {
                         description: "Missing `q`.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Invalid arguments" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/maps/reverse-geocode": {
+            get: {
+                tags: ["Location"],
+                summary: "Convert coordinates into a readable address",
+                description:
+                    "Reverse geocodes the caller's current latitude and longitude. Tries Apple Maps first; " +
+                    "when Apple returns no address, falls back to OpenStreetMap (Nominatim). The response is " +
+                    "normalized to the same `PlaceSuggestion` shape used by the other location endpoints.",
+                parameters: [
+                    {
+                        name: "lat",
+                        in: "query",
+                        required: true,
+                        description: "Latitude between -90 and 90.",
+                        schema: { type: "number", minimum: -90, maximum: 90 },
+                        example: -8.6705,
+                    },
+                    {
+                        name: "lng",
+                        in: "query",
+                        required: true,
+                        description: "Longitude between -180 and 180.",
+                        schema: { type: "number", minimum: -180, maximum: 180 },
+                        example: 115.2126,
+                    },
+                    {
+                        name: "lang",
+                        in: "query",
+                        required: false,
+                        description: "Address language. Defaults to `en-US`.",
+                        schema: { type: "string", enum: ["en-US", "id-ID", "en", "id"], default: "en-US" },
+                    },
+                ],
+                responses: {
+                    "200": {
+                        description: "Address found (possibly empty), and which provider produced it.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["results", "source"],
+                                    properties: {
+                                        results: { type: "array", items: { $ref: "#/components/schemas/PlaceSuggestion" } },
+                                        source: {
+                                            type: "string",
+                                            enum: ["apple", "osm"],
+                                            description: "Which provider actually produced `results`.",
+                                        },
+                                    },
+                                },
+                                example: {
+                                    results: [
+                                        {
+                                            label: "Jalan Diponegoro",
+                                            sublabel: "Denpasar, Bali, Indonesia",
+                                            lat: -8.6705,
+                                            lng: 115.2126,
+                                        },
+                                    ],
+                                    source: "apple",
+                                },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Missing or invalid `lat`/`lng`.",
                         content: {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },

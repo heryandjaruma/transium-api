@@ -205,3 +205,17 @@ export async function resolveCompletion(env: CloudflareEnv, completionUrl: strin
 export async function geocode(env: CloudflareEnv, query: string, bias: SearchBias): Promise<AppleSearchResponse> {
   return mapsFetch(env, `/v1/geocode?${searchParams(query, bias)}`);
 }
+
+/** Resolves coordinates to an address via Apple's `/v1/reverseGeocode`. */
+export async function reverseGeocode(
+  env: CloudflareEnv,
+  location: { lat: number; lng: number },
+  lang: MapsLang = DEFAULT_MAPS_LANG
+): Promise<AppleSearchResponse> {
+  const params = new URLSearchParams({
+    loc: `${location.lat},${location.lng}`,
+    lang,
+  });
+
+  return mapsFetch(env, `/v1/reverseGeocode?${params}`);
+}
