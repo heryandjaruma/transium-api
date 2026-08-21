@@ -149,7 +149,7 @@ export const openApiSpec = {
             description:
                 "The caller's photo gallery — every photo uploaded via `POST /private/journey/media` (against a " +
                 "specific step, or a journey attempt directly), across every journey attempt they've ever had, " +
-                "in one flat list. `GET /private/gallery` lists them; `GET /private/gallery/{id}` downloads one. " +
+                "in a most-recent-first paginated list. `GET /private/gallery` lists them; `GET /private/gallery/{id}` downloads one. " +
                 "All endpoints under this tag require `Authorization: Bearer <session-token>` and are scoped to " +
                 "the caller's own photos.",
         },
@@ -1933,13 +1933,29 @@ export const openApiSpec = {
         "/private/gallery": {
             get: {
                 tags: ["Gallery"],
-                summary: "List every photo across the caller's journey attempts",
+                summary: "List a page of photos across the caller's journey attempts",
                 description:
-                    "Returns every photo the caller has uploaded to any journey attempt — against a specific " +
-                    "step or the attempt directly — most recent first. Each entry carries the quest (and, when " +
-                    "step-tied, the journey step) it came from so a client can group/label them without extra " +
-                    "lookups.",
+                    "Returns a page of photos the caller has uploaded to any journey attempt — against a specific " +
+                    "step or the attempt directly — most recent first. Use the 1-based `page` parameter and the " +
+                    "`limit` parameter (1–100, default 20) to paginate. Each entry carries the quest (and, when " +
+                    "step-tied, the journey step) it came from so a client can group/label them without extra lookups.",
                 security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        name: "page",
+                        in: "query",
+                        required: false,
+                        schema: { type: "integer", minimum: 1, default: 1 },
+                        description: "1-based page number.",
+                    },
+                    {
+                        name: "limit",
+                        in: "query",
+                        required: false,
+                        schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+                        description: "Number of photos per page.",
+                    },
+                ],
                 responses: {
                     "200": {
                         description: "The caller's gallery.",
@@ -1947,9 +1963,32 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: {
                                     type: "object",
-                                    required: ["media"],
-                                    properties: { media: { type: "array", items: { $ref: "#/components/schemas/GalleryItem" } } },
+                                    required: ["media", "pagination"],
+                                    properties: {
+                                        media: { type: "array", items: { $ref: "#/components/schemas/GalleryItem" } },
+                                        pagination: {
+                                            type: "object",
+                                            required: ["page", "limit", "total", "totalPages", "hasNextPage", "hasPreviousPage"],
+                                            properties: {
+                                                page: { type: "integer", minimum: 1 },
+                                                limit: { type: "integer", minimum: 1, maximum: 100 },
+                                                total: { type: "integer", minimum: 0 },
+                                                totalPages: { type: "integer", minimum: 0 },
+                                                hasNextPage: { type: "boolean" },
+                                                hasPreviousPage: { type: "boolean" },
+                                            },
+                                        },
+                                    },
                                 },
+                            },
+                        },
+                    },
+                    "400": {
+                        description: "Invalid pagination parameters.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Invalid pagination parameters" },
                             },
                         },
                     },

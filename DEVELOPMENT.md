@@ -126,7 +126,7 @@ Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.
 
 | Method | Path                          | Purpose                                                                        |
 | ------ | ------------------------------ | --------------------------------------------------------------------------------- |
-| GET    | `/api/private/gallery`         | List every photo across all of the caller's journey steps, most recent first. |
+| GET    | `/api/private/gallery`         | List a page of the caller's photos, most recent first. Query: `page` (1-based, default `1`) and `limit` (1–100, default `20`). |
 | GET    | `/api/private/gallery/{id}`    | Download a single photo (`id` is the Media id) as an attachment.              |
 
 Full request/response schemas are documented in the OpenAPI spec (`/api/openapi.json`, rendered at `/reference`) under the "Gallery" tag.
