@@ -4,8 +4,11 @@
 // Only documents /api/astar, the Trip-tagged /api/journey/overview and /api/journey/real,
 // /api/maps/route, /api/maps/search, /api/maps/search/resolve, /api/maps/geocode,
 // /api/maps/reverse-geocode, the
-// Quest-tagged paths, and the Journey-tagged /api/private/journey* paths for now — add
-// other paths here as they get documented.
+// Quest-tagged paths, the Journey-tagged /api/private/journey* paths, and the
+// Area-tagged /api/area/{id}/kelurahan path for now — add other paths here as they get
+// documented. (Admin CRUD — /api/area, /api/kelurahan, /api/badge, /api/action-definition,
+// and their /media sub-routes — is intentionally left undocumented here, same as every
+// other admin resource.)
 
 const journeyStepSchema = {
     description:
@@ -163,6 +166,13 @@ export const openApiSpec = {
                 "account (e.g. a different user signing in on the same physical device) reassigns it rather than " +
                 "creating a duplicate. `POST /private/device/test` sends a canned push to verify setup end-to-end. " +
                 "All endpoints under this tag require `Authorization: Bearer <session-token>`.",
+        },
+        {
+            name: "Area",
+            description:
+                "An area groups several kelurahans together (Kelurahan.areaId) and carries its own thumbnails, " +
+                "category, description, and a `lat`/`lng` center point used to estimate distance to it. " +
+                "`GET /area/{id}/kelurahan` lists an area's member kelurahans.",
         },
         {
             name: "Location",
@@ -673,6 +683,22 @@ export const openApiSpec = {
                         type: ["string", "null"],
                         description: "Comma-separated majority destination types here, e.g. \"Beach,Mountains\". Null if unset.",
                     },
+                    thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
+                },
+            },
+            Area: {
+                type: "object",
+                required: ["id", "name", "description", "category", "lat", "lng", "thumbnails"],
+                properties: {
+                    id: { type: "string" },
+                    name: { type: "string" },
+                    description: { type: ["string", "null"], description: "A brief, catchy description of the area. Null if unset." },
+                    category: {
+                        type: ["string", "null"],
+                        description: "Comma-separated majority destination types here, e.g. \"Beach,Mountains\". Null if unset.",
+                    },
+                    lat: { type: "number", description: "Center point latitude, used to estimate distance to this area." },
+                    lng: { type: "number", description: "Center point longitude, used to estimate distance to this area." },
                     thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
                 },
             },
@@ -3285,6 +3311,40 @@ export const openApiSpec = {
                             "application/json": {
                                 schema: { type: "object", properties: { error: { type: "string" } } },
                                 example: { error: "Kelurahan not found" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/area/{id}/kelurahan": {
+            get: {
+                tags: ["Area"],
+                summary: "List an area's kelurahans",
+                description: "Returns the group of kelurahans belonging to this area, each with its thumbnails, alongside the area itself.",
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+                responses: {
+                    "200": {
+                        description: "Area and its kelurahans.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["area", "kelurahans"],
+                                    properties: {
+                                        area: { $ref: "#/components/schemas/Area" },
+                                        kelurahans: { type: "array", items: { $ref: "#/components/schemas/Kelurahan" } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No area with this id.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Area not found" },
                             },
                         },
                     },

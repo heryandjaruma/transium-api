@@ -58,6 +58,12 @@ export function AppSidebar() {
                         </SidebarMenuItem>
                         <SidebarMenuItem>
                             <SidebarMenuButton
+                                isActive={pathname === "/area"}
+                                render={<Link href="/area">Areas</Link>}
+                            />
+                        </SidebarMenuItem>
+                        <SidebarMenuItem>
+                            <SidebarMenuButton
                                 isActive={pathname === "/kelurahan"}
                                 render={<Link href="/kelurahan">Kelurahan</Link>}
                             />

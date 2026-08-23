@@ -14,5 +14,6 @@ export type Kelurahan = {
     description: string | null
     /** Comma-separated, e.g. "Beach,Mountains" — the majority of what this kelurahan's destinations are like. */
     category: string | null
+    areaId: string | null
     thumbnails: KelurahanMedia[]
 }
