@@ -11,16 +11,17 @@ type AreaRow = {
     lat: number;
     lng: number;
     photoUrl: string | null;
+    label: string | null;
 };
 type MediaRow = { id: string; createdAt: string; type: string; url: string; alt: string | null; copyright: string | null };
 
 const UPDATABLE_STRING_FIELDS = ["name"] as const;
-const NULLABLE_STRING_FIELDS = ["description", "category"] as const;
+const NULLABLE_STRING_FIELDS = ["description", "category", "label"] as const;
 const NUMBER_FIELDS = ["lat", "lng"] as const;
 
 async function getAreaWithThumbnails(db: D1Database, id: string) {
     const area = await db
-        .prepare(`SELECT id, name, description, category, lat, lng, photoUrl FROM Area WHERE id = ?`)
+        .prepare(`SELECT id, name, description, category, lat, lng, photoUrl, label FROM Area WHERE id = ?`)
         .bind(id)
         .first<AreaRow>();
     if (!area) return null;
@@ -49,8 +50,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 /**
- * Updates an area. Body may include any of `{ name, lat, lng, description, category }`.
- * `description`/`category` each accept a non-empty string or `null` to clear it.
+ * Updates an area. Body may include any of `{ name, lat, lng, description, category, label }`.
+ * `description`/`category`/`label` each accept a non-empty string or `null` to clear it.
  * Use /api/area/photo to change the hero `photoUrl`.
  */
 export async function PATCH(request: NextRequest, { params }: Params) {

@@ -10,6 +10,7 @@ type AreaRow = {
     lat: number;
     lng: number;
     photoUrl: string | null;
+    label: string | null;
 };
 type QuestRow = { id: string; name: string; category: string; description: string; xp: number; label: string | null };
 
@@ -25,6 +26,7 @@ export async function GET() {
         .prepare(
             `SELECT DISTINCT a.id as areaId, a.name as areaName, a.description as areaDescription,
                     a.category as areaCategory, a.lat as areaLat, a.lng as areaLng, a.photoUrl as areaPhotoUrl,
+                    a.label as areaLabel,
                     q.id as id, q.name as name, q.category as category, q.description as description, q.xp as xp, q.label as label
              FROM Quest q
              JOIN QuestBadge qb ON qb.questId = q.id
@@ -41,6 +43,7 @@ export async function GET() {
                 areaLat: number;
                 areaLng: number;
                 areaPhotoUrl: string | null;
+                areaLabel: string | null;
             }
         >();
 
@@ -53,7 +56,7 @@ export async function GET() {
     ]);
 
     const groupsByArea = new Map<string, { area: AreaRow & { thumbnails: MediaAsset[] }; quests: (QuestRow & { thumbnails: MediaAsset[] })[] }>();
-    for (const { areaId, areaName, areaDescription, areaCategory, areaLat, areaLng, areaPhotoUrl, ...quest } of questLinksRes.results) {
+    for (const { areaId, areaName, areaDescription, areaCategory, areaLat, areaLng, areaPhotoUrl, areaLabel, ...quest } of questLinksRes.results) {
         if (!groupsByArea.has(areaId)) {
             groupsByArea.set(areaId, {
                 area: {
@@ -64,6 +67,7 @@ export async function GET() {
                     lat: areaLat,
                     lng: areaLng,
                     photoUrl: areaPhotoUrl,
+                    label: areaLabel,
                     thumbnails: thumbnailsByArea.get(areaId) ?? [],
                 },
                 quests: [],

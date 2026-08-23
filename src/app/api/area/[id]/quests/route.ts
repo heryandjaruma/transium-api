@@ -11,6 +11,7 @@ type AreaRow = {
     lat: number;
     lng: number;
     photoUrl: string | null;
+    label: string | null;
 };
 type QuestRow = { id: string; name: string; category: string; description: string; xp: number; label: string | null };
 type MediaRow = { id: string; createdAt: string; type: string; url: string; alt: string | null; copyright: string | null };
@@ -34,7 +35,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const { env } = getCloudflareContext();
 
     const [areaRow, areaThumbnails] = await Promise.all([
-        env.DB.prepare(`SELECT id, name, description, category, lat, lng, photoUrl FROM Area WHERE id = ?`).bind(id).first<AreaRow>(),
+        env.DB.prepare(`SELECT id, name, description, category, lat, lng, photoUrl, label FROM Area WHERE id = ?`).bind(id).first<AreaRow>(),
         fetchAreaThumbnails(env.DB, [id]),
     ]);
     if (!areaRow) return NextResponse.json({ error: "Area not found" }, { status: 404 });

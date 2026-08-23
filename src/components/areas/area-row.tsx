@@ -43,8 +43,9 @@ export function AreaRow({ area, onEdit, onDelete }: Props) {
                     {area.lat.toFixed(5)}, {area.lng.toFixed(5)}
                 </p>
                 {area.description && <p className="truncate text-sm text-muted-foreground">{area.description}</p>}
-                {categories.length > 0 && (
+                {(area.label || categories.length > 0) && (
                     <div className="mt-1 flex flex-wrap gap-1">
+                        {area.label && <Badge>{area.label}</Badge>}
                         {categories.map((c) => (
                             <Badge key={c} variant="secondary">
                                 {c}

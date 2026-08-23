@@ -18,5 +18,7 @@ export type Area = {
     lng: number
     /** A single hero photo shown before the area's details. Set via /api/area/photo. Distinct from `thumbnails`. */
     photoUrl: string | null
+    /** A highlight tag, e.g. "Recommended". Null if unset. Filterable via GET /area?label=. */
+    label: string | null
     thumbnails: AreaMedia[]
 }

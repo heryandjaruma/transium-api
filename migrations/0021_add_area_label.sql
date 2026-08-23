@@ -1,0 +1,3 @@
+-- Migration number: 0021 	 2026-08-24T00:00:00.000Z
+
+ALTER TABLE Area ADD COLUMN label TEXT;

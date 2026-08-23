@@ -28,7 +28,7 @@ type Props = {
     onSaved: (area: Area) => void
 }
 
-const emptyForm = { name: "", description: "", category: "", lat: "", lng: "" }
+const emptyForm = { name: "", description: "", category: "", lat: "", lng: "", label: "" }
 
 /** Create/edit sheet for an area. Once the area exists (editing, or just created), also manages its thumbnails and kelurahan membership. */
 export function AreaFormSheet({ open, onOpenChange, area, onSaved }: Props) {
@@ -48,6 +48,7 @@ export function AreaFormSheet({ open, onOpenChange, area, onSaved }: Props) {
                       category: area.category ?? "",
                       lat: String(area.lat),
                       lng: String(area.lng),
+                      label: area.label ?? "",
                   }
                 : emptyForm
         )
@@ -78,6 +79,7 @@ export function AreaFormSheet({ open, onOpenChange, area, onSaved }: Props) {
                 lng,
                 description: form.description.trim() || null,
                 category: form.category.trim() || null,
+                label: form.label.trim() || null,
             }
             const res = await fetch(isEditing ? `/api/area/${savedArea!.id}` : "/api/area", {
                 method: isEditing ? "PATCH" : "POST",
@@ -178,6 +180,16 @@ export function AreaFormSheet({ open, onOpenChange, area, onSaved }: Props) {
                             disabled={saving}
                         />
                         <p className="text-xs text-muted-foreground">Comma-separated majority destination types.</p>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                        <Label htmlFor="area-label">Label</Label>
+                        <Input
+                            id="area-label"
+                            value={form.label}
+                            onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+                            placeholder="e.g. Recommended"
+                            disabled={saving}
+                        />
                     </div>
 
                     {error && <p className="text-sm text-destructive">{error}</p>}

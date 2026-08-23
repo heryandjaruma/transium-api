@@ -174,7 +174,8 @@ export const openApiSpec = {
             name: "Area",
             description:
                 "An area groups several kelurahans together (Kelurahan.areaId) and carries its own thumbnails, " +
-                "category, description, and a `lat`/`lng` center point used to estimate distance to it. " +
+                "category, description, a `lat`/`lng` center point used to estimate distance to it, and an " +
+                "optional highlight `label` (e.g. \"Recommended\", filterable via GET /area?label=). " +
                 "`GET /area/{id}/kelurahan` lists an area's member kelurahans.",
         },
         {
@@ -691,7 +692,7 @@ export const openApiSpec = {
             },
             Area: {
                 type: "object",
-                required: ["id", "name", "description", "category", "lat", "lng", "photoUrl", "thumbnails"],
+                required: ["id", "name", "description", "category", "lat", "lng", "photoUrl", "label", "thumbnails"],
                 properties: {
                     id: { type: "string" },
                     name: { type: "string" },
@@ -706,6 +707,7 @@ export const openApiSpec = {
                         type: ["string", "null"],
                         description: "A single hero photo shown before the area's details. Set via POST /area/photo. Null if unset.",
                     },
+                    label: { type: ["string", "null"], description: "A highlight tag, e.g. \"Recommended\". Null if unset. Filterable via GET /area?label=." },
                     thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
                 },
             },

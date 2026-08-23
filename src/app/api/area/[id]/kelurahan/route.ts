@@ -11,6 +11,7 @@ type AreaRow = {
     lat: number;
     lng: number;
     photoUrl: string | null;
+    label: string | null;
 };
 type KelurahanRow = { id: string; kelurahanName: string; kecamatanName: string; description: string | null; category: string | null };
 
@@ -19,7 +20,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const { id } = await params;
     const { env } = getCloudflareContext();
 
-    const areaRow = await env.DB.prepare(`SELECT id, name, description, category, lat, lng, photoUrl FROM Area WHERE id = ?`).bind(id).first<AreaRow>();
+    const areaRow = await env.DB.prepare(`SELECT id, name, description, category, lat, lng, photoUrl, label FROM Area WHERE id = ?`).bind(id).first<AreaRow>();
     if (!areaRow) return NextResponse.json({ error: "Area not found" }, { status: 404 });
 
     const [areaThumbnails, kelurahansRes] = await Promise.all([
