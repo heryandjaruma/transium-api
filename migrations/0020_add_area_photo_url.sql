@@ -1,0 +1,3 @@
+-- Migration number: 0020 	 2026-08-23T00:00:00.000Z
+
+ALTER TABLE Area ADD COLUMN photoUrl TEXT;

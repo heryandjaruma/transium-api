@@ -24,15 +24,15 @@ type Props = {
 }
 
 export function AreaRow({ area, onEdit, onDelete }: Props) {
-    const thumbnail = area.thumbnails[0]
+    const coverUrl = area.photoUrl ?? area.thumbnails[0]?.url
     const categories = area.category?.split(",").map((c) => c.trim()).filter(Boolean) ?? []
 
     return (
         <div className="flex items-center gap-4 px-4 py-3">
             <div className="size-12 shrink-0 overflow-hidden rounded-lg bg-muted">
-                {thumbnail ? (
+                {coverUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={thumbnail.url} alt="" className="size-full object-cover" />
+                    <img src={coverUrl} alt="" className="size-full object-cover" />
                 ) : (
                     <div className="flex size-full items-center justify-center text-[10px] text-muted-foreground">No image</div>
                 )}

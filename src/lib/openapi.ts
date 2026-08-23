@@ -688,7 +688,7 @@ export const openApiSpec = {
             },
             Area: {
                 type: "object",
-                required: ["id", "name", "description", "category", "lat", "lng", "thumbnails"],
+                required: ["id", "name", "description", "category", "lat", "lng", "photoUrl", "thumbnails"],
                 properties: {
                     id: { type: "string" },
                     name: { type: "string" },
@@ -699,6 +699,10 @@ export const openApiSpec = {
                     },
                     lat: { type: "number", description: "Center point latitude, used to estimate distance to this area." },
                     lng: { type: "number", description: "Center point longitude, used to estimate distance to this area." },
+                    photoUrl: {
+                        type: ["string", "null"],
+                        description: "A single hero photo shown before the area's details. Set via POST /area/photo. Null if unset.",
+                    },
                     thumbnails: { type: "array", items: { $ref: "#/components/schemas/MediaAsset" } },
                 },
             },

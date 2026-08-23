@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
 import { AreaKelurahanMapper } from "@/components/areas/area-kelurahan-mapper"
+import { AreaPhoto } from "@/components/areas/area-photo"
 import { AreaThumbnails } from "@/components/areas/area-thumbnails"
 import type { Area } from "@/lib/area"
 
@@ -105,6 +106,13 @@ export function AreaFormSheet({ open, onOpenChange, area, onSaved }: Props) {
         onSaved(next)
     }
 
+    function handlePhotoChange(photoUrl: string | null) {
+        if (!savedArea) return
+        const next = { ...savedArea, photoUrl }
+        setSavedArea(next)
+        onSaved(next)
+    }
+
     return (
         <Sheet open={open} onOpenChange={onOpenChange}>
             <SheetContent>
@@ -173,6 +181,14 @@ export function AreaFormSheet({ open, onOpenChange, area, onSaved }: Props) {
                     </div>
 
                     {error && <p className="text-sm text-destructive">{error}</p>}
+
+                    {savedArea && (
+                        <div className="flex flex-col gap-1.5 border-t border-border pt-4">
+                            <Label>Photo</Label>
+                            <p className="text-xs text-muted-foreground">A single hero photo shown before the area&apos;s details.</p>
+                            <AreaPhoto areaId={savedArea.id} photoUrl={savedArea.photoUrl} onChange={handlePhotoChange} />
+                        </div>
+                    )}
 
                     {savedArea && (
                         <div className="flex flex-col gap-1.5 border-t border-border pt-4">

@@ -16,5 +16,7 @@ export type Area = {
     /** Center point, used to estimate distance to this area. */
     lat: number
     lng: number
+    /** A single hero photo shown before the area's details. Set via /api/area/photo. Distinct from `thumbnails`. */
+    photoUrl: string | null
     thumbnails: AreaMedia[]
 }

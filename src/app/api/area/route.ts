@@ -2,12 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { fetchAreaThumbnails } from "@/lib/media-storage";
 
-type AreaRow = { id: string; name: string; description: string | null; category: string | null; lat: number; lng: number };
+type AreaRow = {
+    id: string;
+    name: string;
+    description: string | null;
+    category: string | null;
+    lat: number;
+    lng: number;
+    photoUrl: string | null;
+};
 
 /** Returns all areas, each with its thumbnail media. */
 export async function GET() {
     const { env } = getCloudflareContext();
-    const res = await env.DB.prepare(`SELECT id, name, description, category, lat, lng FROM Area`).all<AreaRow>();
+    const res = await env.DB.prepare(`SELECT id, name, description, category, lat, lng, photoUrl FROM Area`).all<AreaRow>();
 
     const thumbnailsByArea = await fetchAreaThumbnails(env.DB, res.results.map((a) => a.id));
     const areas = res.results.map((area) => ({ ...area, thumbnails: thumbnailsByArea.get(area.id) ?? [] }));
@@ -19,6 +27,7 @@ export async function GET() {
  * Creates an area. Body: `{ name, lat, lng, description?, category? }`.
  * `lat`/`lng` are the area's center point, used to estimate distance to it later.
  * `category` is a comma-separated list of the majority destination types here, e.g. "Beach,Mountains".
+ * Use /api/area/photo to set the hero `photoUrl` afterward.
  */
 export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => null);
@@ -43,6 +52,7 @@ export async function POST(request: NextRequest) {
         category: typeof category === "string" ? category.trim() : null,
         lat,
         lng,
+        photoUrl: null,
     };
 
     await env.DB

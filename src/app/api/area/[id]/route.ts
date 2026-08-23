@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { pruneOrphanedAreaMedia } from "@/lib/media-storage";
+import { pruneOrphanedAreaMedia, r2KeyFromMediaUrl } from "@/lib/media-storage";
 
 type Params = { params: Promise<{ id: string }> };
-type AreaRow = { id: string; name: string; description: string | null; category: string | null; lat: number; lng: number };
+type AreaRow = {
+    id: string;
+    name: string;
+    description: string | null;
+    category: string | null;
+    lat: number;
+    lng: number;
+    photoUrl: string | null;
+};
 type MediaRow = { id: string; createdAt: string; type: string; url: string; alt: string | null; copyright: string | null };
 
 const UPDATABLE_STRING_FIELDS = ["name"] as const;
@@ -12,7 +20,7 @@ const NUMBER_FIELDS = ["lat", "lng"] as const;
 
 async function getAreaWithThumbnails(db: D1Database, id: string) {
     const area = await db
-        .prepare(`SELECT id, name, description, category, lat, lng FROM Area WHERE id = ?`)
+        .prepare(`SELECT id, name, description, category, lat, lng, photoUrl FROM Area WHERE id = ?`)
         .bind(id)
         .first<AreaRow>();
     if (!area) return null;
@@ -43,6 +51,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 /**
  * Updates an area. Body may include any of `{ name, lat, lng, description, category }`.
  * `description`/`category` each accept a non-empty string or `null` to clear it.
+ * Use /api/area/photo to change the hero `photoUrl`.
  */
 export async function PATCH(request: NextRequest, { params }: Params) {
     const { id } = await params;
@@ -95,12 +104,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ area: await getAreaWithThumbnails(env.DB, id) });
 }
 
-/** Deletes an area, its AreaMedia links (pruning thumbnails no longer used elsewhere), and clears it from any kelurahans that referenced it. */
+/** Deletes an area, its AreaMedia links and photo (pruning thumbnails no longer used elsewhere), and clears it from any kelurahans that referenced it. */
 export async function DELETE(_request: NextRequest, { params }: Params) {
     const { id } = await params;
     const { env } = getCloudflareContext();
 
-    const existing = await env.DB.prepare(`SELECT id FROM Area WHERE id = ?`).bind(id).first();
+    const existing = await env.DB.prepare(`SELECT id, photoUrl FROM Area WHERE id = ?`).bind(id).first<{ id: string; photoUrl: string | null }>();
     if (!existing) return NextResponse.json({ error: "Area not found" }, { status: 404 });
 
     const links = await env.DB.prepare(`SELECT mediaId FROM AreaMedia WHERE areaId = ?`).bind(id).all<{ mediaId: string }>();
@@ -112,6 +121,9 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     ]);
 
     await pruneOrphanedAreaMedia(env.DB, env.TILES_BUCKET, links.results.map((r) => r.mediaId));
+    if (existing.photoUrl) {
+        await env.TILES_BUCKET.delete(r2KeyFromMediaUrl(existing.photoUrl));
+    }
 
     return new NextResponse(null, { status: 204 });
 }
