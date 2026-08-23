@@ -3,7 +3,14 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { pruneOrphanedKelurahanMedia } from "@/lib/media-storage";
 
 type Params = { params: Promise<{ id: string }> };
-type KelurahanRow = { id: string; kelurahanName: string; kecamatanName: string; description: string | null; category: string | null };
+type KelurahanRow = {
+    id: string;
+    kelurahanName: string;
+    kecamatanName: string;
+    description: string | null;
+    category: string | null;
+    areaId: string | null;
+};
 type MediaRow = { id: string; createdAt: string; type: string; url: string; alt: string | null; copyright: string | null };
 
 const UPDATABLE_STRING_FIELDS = ["kelurahanName", "kecamatanName"] as const;
@@ -11,7 +18,7 @@ const NULLABLE_STRING_FIELDS = ["description", "category"] as const;
 
 async function getKelurahanWithThumbnails(db: D1Database, id: string) {
     const kelurahan = await db
-        .prepare(`SELECT id, kelurahanName, kecamatanName, description, category FROM Kelurahan WHERE id = ?`)
+        .prepare(`SELECT id, kelurahanName, kecamatanName, description, category, areaId FROM Kelurahan WHERE id = ?`)
         .bind(id)
         .first<KelurahanRow>();
     if (!kelurahan) return null;
@@ -40,8 +47,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 /**
- * Updates a kelurahan. Body may include any of `{ kelurahanName, kecamatanName, description, category }`.
- * `description`/`category` each accept a non-empty string or `null` to clear it.
+ * Updates a kelurahan. Body may include any of `{ kelurahanName, kecamatanName, description, category, areaId }`.
+ * `description`/`category`/`areaId` each accept a non-empty string or `null` to clear it.
  */
 export async function PATCH(request: NextRequest, { params }: Params) {
     const { id } = await params;
@@ -72,11 +79,25 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         values.push(typeof value === "string" ? value.trim() : null);
     }
 
+    const { env } = getCloudflareContext();
+
+    if ("areaId" in bodyRecord) {
+        const areaId = bodyRecord.areaId;
+        if (areaId !== null && typeof areaId !== "string") {
+            return NextResponse.json({ error: "Invalid areaId" }, { status: 400 });
+        }
+        if (areaId) {
+            const area = await env.DB.prepare(`SELECT id FROM Area WHERE id = ?`).bind(areaId).first();
+            if (!area) return NextResponse.json({ error: "Area not found" }, { status: 404 });
+        }
+        fields.push("areaId = ?");
+        values.push(typeof areaId === "string" ? areaId : null);
+    }
+
     if (fields.length === 0) {
         return NextResponse.json({ error: "No fields to update" }, { status: 400 });
     }
 
-    const { env } = getCloudflareContext();
     const existing = await env.DB.prepare(`SELECT id FROM Kelurahan WHERE id = ?`).bind(id).first();
     if (!existing) return NextResponse.json({ error: "Kelurahan not found" }, { status: 404 });
 

@@ -20,6 +20,7 @@ const ID_CHUNK_SIZE = 90
 export const QUEST_MEDIA_PREFIX = "media/system/quest"
 export const BADGE_MEDIA_PREFIX = "media/system/badge"
 export const KELURAHAN_MEDIA_PREFIX = "media/system/kelurahan"
+export const AREA_MEDIA_PREFIX = "media/system/area"
 export const USER_JOURNEY_MEDIA_PREFIX = "media/user"
 
 export function questMediaKey(questId: string, filename: string) {
@@ -28,6 +29,10 @@ export function questMediaKey(questId: string, filename: string) {
 
 export function kelurahanMediaKey(kelurahanId: string, filename: string) {
     return `${KELURAHAN_MEDIA_PREFIX}/${kelurahanId}/${filename}`
+}
+
+export function areaMediaKey(areaId: string, filename: string) {
+    return `${AREA_MEDIA_PREFIX}/${areaId}/${filename}`
 }
 
 export function badgeMediaKey(badgeId: string, filename: string) {
@@ -133,6 +138,57 @@ export async function pruneOrphanedKelurahanMedia(db: D1Database, bucket: R2Buck
     const placeholders = candidates.map(() => "?").join(", ")
     const stillLinked = await db
         .prepare(`SELECT DISTINCT mediaId FROM KelurahanMedia WHERE mediaId IN (${placeholders})`)
+        .bind(...candidates)
+        .all<{ mediaId: string }>()
+    const linked = new Set(stillLinked.results.map((r) => r.mediaId))
+
+    const orphanIds = candidates.filter((id) => !linked.has(id))
+    if (orphanIds.length === 0) return
+
+    const orphanPlaceholders = orphanIds.map(() => "?").join(", ")
+    const orphans = await db
+        .prepare(`SELECT id, url FROM Media WHERE id IN (${orphanPlaceholders})`)
+        .bind(...orphanIds)
+        .all<{ id: string; url: string }>()
+
+    const keys = orphans.results.map((m) => r2KeyFromMediaUrl(m.url))
+    if (keys.length > 0) await bucket.delete(keys)
+
+    await db.prepare(`DELETE FROM Media WHERE id IN (${orphanPlaceholders})`).bind(...orphanIds).run()
+}
+
+/** Bulk-fetches each area's thumbnails via AreaMedia, batching to stay under D1's bound-parameter limit. */
+export async function fetchAreaThumbnails(db: D1Database, areaIds: string[]): Promise<Map<string, MediaAsset[]>> {
+    const map = new Map<string, MediaAsset[]>()
+    for (const ids of chunk(areaIds, ID_CHUNK_SIZE)) {
+        const placeholders = ids.map(() => "?").join(", ")
+        const res = await db
+            .prepare(
+                `SELECT am.areaId as areaId, m.id as id, m.createdAt as createdAt, m.type as type, m.url as url, m.alt as alt, m.copyright as copyright
+                 FROM AreaMedia am JOIN Media m ON m.id = am.mediaId
+                 WHERE am.areaId IN (${placeholders})`
+            )
+            .bind(...ids)
+            .all<MediaAsset & { areaId: string }>()
+        for (const { areaId, ...media } of res.results) {
+            if (!map.has(areaId)) map.set(areaId, [])
+            map.get(areaId)!.push(media)
+        }
+    }
+    return map
+}
+
+/**
+ * Deletes Media rows (and their R2 objects) that are no longer referenced by
+ * any AreaMedia link. Call after removing AreaMedia rows.
+ */
+export async function pruneOrphanedAreaMedia(db: D1Database, bucket: R2Bucket, mediaIds: string[]) {
+    const candidates = [...new Set(mediaIds)]
+    if (candidates.length === 0) return
+
+    const placeholders = candidates.map(() => "?").join(", ")
+    const stillLinked = await db
+        .prepare(`SELECT DISTINCT mediaId FROM AreaMedia WHERE mediaId IN (${placeholders})`)
         .bind(...candidates)
         .all<{ mediaId: string }>()
     const linked = new Set(stillLinked.results.map((r) => r.mediaId))

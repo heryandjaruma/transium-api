@@ -2,12 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { fetchKelurahanThumbnails } from "@/lib/media-storage";
 
-type KelurahanRow = { id: string; kelurahanName: string; kecamatanName: string; description: string | null; category: string | null };
+type KelurahanRow = {
+    id: string;
+    kelurahanName: string;
+    kecamatanName: string;
+    description: string | null;
+    category: string | null;
+    areaId: string | null;
+};
 
 /** Returns all kelurahans, each with its thumbnail media. */
 export async function GET() {
     const { env } = getCloudflareContext();
-    const res = await env.DB.prepare(`SELECT id, kelurahanName, kecamatanName, description, category FROM Kelurahan`).all<KelurahanRow>();
+    const res = await env.DB.prepare(`SELECT id, kelurahanName, kecamatanName, description, category, areaId FROM Kelurahan`).all<KelurahanRow>();
 
     const thumbnailsByKelurahan = await fetchKelurahanThumbnails(env.DB, res.results.map((k) => k.id));
     const kelurahans = res.results.map((kelurahan) => ({ ...kelurahan, thumbnails: thumbnailsByKelurahan.get(kelurahan.id) ?? [] }));
@@ -16,12 +23,12 @@ export async function GET() {
 }
 
 /**
- * Creates a kelurahan. Body: `{ kelurahanName, kecamatanName, description?, category? }`.
+ * Creates a kelurahan. Body: `{ kelurahanName, kecamatanName, description?, category?, areaId? }`.
  * `category` is a comma-separated list of the majority destination types here, e.g. "Beach,Mountains".
  */
 export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => null);
-    const { kelurahanName, kecamatanName, description, category } = (body ?? {}) as Record<string, unknown>;
+    const { kelurahanName, kecamatanName, description, category, areaId } = (body ?? {}) as Record<string, unknown>;
 
     if (
         typeof kelurahanName !== "string" || !kelurahanName.trim() ||
@@ -31,8 +38,17 @@ export async function POST(request: NextRequest) {
     ) {
         return NextResponse.json({ error: "Invalid arguments" }, { status: 400 });
     }
+    if (areaId !== undefined && areaId !== null && typeof areaId !== "string") {
+        return NextResponse.json({ error: "Invalid areaId" }, { status: 400 });
+    }
 
     const { env } = getCloudflareContext();
+
+    if (areaId) {
+        const area = await env.DB.prepare(`SELECT id FROM Area WHERE id = ?`).bind(areaId).first();
+        if (!area) return NextResponse.json({ error: "Area not found" }, { status: 404 });
+    }
+
     const id = crypto.randomUUID();
     const kelurahan: KelurahanRow = {
         id,
@@ -40,11 +56,12 @@ export async function POST(request: NextRequest) {
         kecamatanName: kecamatanName.trim(),
         description: typeof description === "string" ? description.trim() : null,
         category: typeof category === "string" ? category.trim() : null,
+        areaId: typeof areaId === "string" ? areaId : null,
     };
 
     await env.DB
-        .prepare(`INSERT INTO Kelurahan (id, kelurahanName, kecamatanName, description, category) VALUES (?, ?, ?, ?, ?)`)
-        .bind(kelurahan.id, kelurahan.kelurahanName, kelurahan.kecamatanName, kelurahan.description, kelurahan.category)
+        .prepare(`INSERT INTO Kelurahan (id, kelurahanName, kecamatanName, description, category, areaId) VALUES (?, ?, ?, ?, ?, ?)`)
+        .bind(kelurahan.id, kelurahan.kelurahanName, kelurahan.kecamatanName, kelurahan.description, kelurahan.category, kelurahan.areaId)
         .run();
 
     return NextResponse.json({ kelurahan: { ...kelurahan, thumbnails: [] } }, { status: 201 });
