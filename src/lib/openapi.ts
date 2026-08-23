@@ -4,11 +4,12 @@
 // Only documents /api/astar, the Trip-tagged /api/journey/overview and /api/journey/real,
 // /api/maps/route, /api/maps/search, /api/maps/search/resolve, /api/maps/geocode,
 // /api/maps/reverse-geocode, the
-// Quest-tagged paths, the Journey-tagged /api/private/journey* paths, and the
-// Area-tagged /api/area/{id}/kelurahan path for now — add other paths here as they get
-// documented. (Admin CRUD — /api/area, /api/kelurahan, /api/badge, /api/action-definition,
-// and their /media sub-routes — is intentionally left undocumented here, same as every
-// other admin resource.)
+// Quest-tagged paths (including /api/area/quests and /api/area/{id}/quests), the
+// Journey-tagged /api/private/journey* paths, and the Area-tagged
+// /api/area/{id}/kelurahan path for now — add other paths here as they get documented.
+// (Admin CRUD — /api/area, /api/kelurahan, /api/badge, /api/action-definition, and their
+// /media sub-routes — is intentionally left undocumented here, same as every other admin
+// resource.)
 
 const journeyStepSchema = {
     description:
@@ -92,7 +93,9 @@ export const openApiSpec = {
                 "one or more badges. A quest has no location of its own — it's reachable through any kelurahan " +
                 "that one of its badges is scoped to (Badge.kelurahanId), and its origin/destination coordinates " +
                 "for route preview come from its badges' step locations. `GET /quest`, `GET /kelurahan/quests`, " +
-                "and `GET /kelurahan/{id}/quests` list quests publicly. Their private, authenticated " +
+                "`GET /kelurahan/{id}/quests`, `GET /area/quests`, and `GET /area/{id}/quests` list quests " +
+                "publicly — the `area`-grouped variants reach quests one hop further out, through any kelurahan " +
+                "that belongs to the area (Kelurahan.areaId). Their private, authenticated " +
                 "counterparts (`Authorization: Bearer <session-token>`) add caller-specific data: " +
                 "`GET /private/quest` narrows the list to quests the caller hasn't completed yet; " +
                 "`GET /private/kelurahan/quest` and `GET /private/kelurahan/{id}/quest` additionally take an " +
@@ -3338,6 +3341,80 @@ export const openApiSpec = {
                                     properties: {
                                         area: { $ref: "#/components/schemas/Area" },
                                         kelurahans: { type: "array", items: { $ref: "#/components/schemas/Kelurahan" } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "404": {
+                        description: "No area with this id.",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { error: { type: "string" } } },
+                                example: { error: "Area not found" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/area/quests": {
+            get: {
+                tags: ["Quest"],
+                summary: "List quests grouped by area",
+                description:
+                    "Returns each area that has at least one reachable quest (a quest with a badge scoped, via " +
+                    "Badge.kelurahanId, to a kelurahan that belongs to that area), paired with those quests. " +
+                    "Areas with no quests are omitted. A quest can appear under more than one area if its badges' " +
+                    "kelurahans span several.",
+                responses: {
+                    "200": {
+                        description: "Groups found.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["groups"],
+                                    properties: {
+                                        groups: {
+                                            type: "array",
+                                            items: {
+                                                type: "object",
+                                                required: ["area", "quests"],
+                                                properties: {
+                                                    area: { $ref: "#/components/schemas/Area" },
+                                                    quests: { type: "array", items: { $ref: "#/components/schemas/Quest" } },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "/area/{id}/quests": {
+            get: {
+                tags: ["Quest"],
+                summary: "List an area's quests",
+                description:
+                    "Returns the quests reachable in this area (quests with at least one badge scoped, via " +
+                    "Badge.kelurahanId, to a kelurahan that belongs to this area), each with its thumbnails and " +
+                    "all of its attached badges.",
+                parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+                responses: {
+                    "200": {
+                        description: "Area and its quests.",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    required: ["area", "quests"],
+                                    properties: {
+                                        area: { $ref: "#/components/schemas/Area" },
+                                        quests: { type: "array", items: { $ref: "#/components/schemas/QuestWithBadges" } },
                                     },
                                 },
                             },
