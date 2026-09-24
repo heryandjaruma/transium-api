@@ -23,6 +23,7 @@
     "better-auth": "^1.6.27",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cn": "^0.4.0",
     "jose": "^6.2.8",
     "lucide-react": "^1.31.0",
     "maplibre-gl": "^6.3.0",
