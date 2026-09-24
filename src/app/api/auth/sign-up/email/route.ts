@@ -1,4 +1,5 @@
 import { getAuth } from "@/lib/auth";
+import { success } from "better-auth";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
@@ -9,14 +10,20 @@ export async function POST(request: NextRequest) {
         email: string,
         password: string
     }
-
-    auth.api.signUpEmail({
-        body: {
-            name: name,
-            email: email,
-            password: password,
-        }
-    })
-    
-    return NextResponse.json({success: true})
+    try {
+        const response = await auth.api.signUpEmail({
+            body: {
+                name: name,
+                email: email,
+                password: password,
+            }
+        })
+        return NextResponse.json({ success: true , message: response})
+    } catch (error) {
+        return NextResponse.json({
+            success: false,
+            message: (error as Error).message || "Unexpected error."
+        },
+            { status: 500 })
+    }
 }
