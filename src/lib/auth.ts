@@ -1,6 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare"
 import { betterAuth } from "better-auth"
-import { bearer } from "better-auth/plugins"
+import { bearer, admin } from "better-auth/plugins"
 import { importPKCS8, SignJWT } from "jose"
 
 // Apple requires a JWT client secret for web OAuth.
@@ -53,6 +53,9 @@ function buildAppleProvider(env: CloudflareEnv) {
 
 export function buildAuth(env: CloudflareEnv) {
     return betterAuth({
+        emailAndPassword: {
+            enabled: true
+        },
         // Better Auth can use the Cloudflare D1 binding directly.
         database: env.DB,
         secret: env.BETTER_AUTH_SECRET,
@@ -64,6 +67,8 @@ export function buildAuth(env: CloudflareEnv) {
             // Let the iOS app authenticate API requests using:
             // Authorization: Bearer <session-token>
             bearer(),
+            // Provide admin capability
+            admin(),
         ],
     })
 }
