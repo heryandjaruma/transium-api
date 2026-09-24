@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { authClient } from "@/lib/auth-client";
 
 const figtreeHeading = Figtree({ subsets: ['latin'], variable: '--font-heading' });
 
@@ -36,15 +37,7 @@ export default function RootLayout({
 	return (
 		<html lang="en" className={cn("font-sans", inter.variable, figtreeHeading.variable)}>
 			<body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-				<TooltipProvider>
-					<SidebarProvider>
-						<AppSidebar />
-						<SidebarInset>
-							<SidebarTrigger />
-							{children}
-						</SidebarInset>
-					</SidebarProvider>
-				</TooltipProvider>
+				{children}
 			</body>
 		</html>
 	);
