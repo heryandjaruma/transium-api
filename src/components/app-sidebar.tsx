@@ -14,6 +14,8 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { Button } from "./ui/button"
+import { User2 } from "lucide-react"
 
 export function AppSidebar() {
     const pathname = usePathname()
@@ -71,7 +73,18 @@ export function AppSidebar() {
                     </SidebarMenu>
                 </SidebarGroup>
             </SidebarContent>
-            <SidebarFooter />
+            <SidebarFooter>
+                <SidebarMenu>
+                    <SidebarMenuItem>
+                        <SidebarMenuButton
+                            isActive={pathname === "/account"}
+                            render={<Link href="/account">Account</Link>}
+                        >
+                            <User2 /> Account
+                        </SidebarMenuButton>
+                    </SidebarMenuItem>
+                </SidebarMenu>
+            </SidebarFooter>
         </Sidebar>
     )
 }
